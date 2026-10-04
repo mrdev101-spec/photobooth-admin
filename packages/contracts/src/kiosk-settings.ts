@@ -53,7 +53,9 @@ export const KioskSettingsBaseSchema = z.object({
     brand: z.object({
       brandName: z.string().max(60),
       photoTitle: z.string().max(80),
-      photoTagline: z.string().max(160)
+      photoTagline: z.string().max(160),
+      /** The brand name printed on photos and badges ('none' = only the event text). */
+      printBranding: z.enum(['brand', 'none'])
     }),
     event: z.object({
       preset: z.string().max(40),
@@ -74,8 +76,34 @@ export const KioskSettingsBaseSchema = z.object({
       size: z.enum(badgeSizeIds),
       copies: z.number().int().min(1).max(12)
     }),
+    /** What the kiosk prints (an order may still sell more, e.g. badges made at the staff desk). */
+    print: z.object({
+      photo: z.boolean(),
+      badge: z.boolean(),
+      queueSlip: z.boolean(),
+      queuePrefix: z.string().regex(/^[A-Z0-9-]{0,3}$/, 'ตัวอักษร A-Z ตัวเลข หรือ - ไม่เกิน 3 ตัว'),
+      queueOnPhoto: z.enum(['off', 'corner'])
+    }),
+    attract: z.object({ showBadges: z.boolean() }),
+    /**
+     * Defaults the kiosk may override on site (decision 2026-10-04 group C); the kiosk reports
+     * its overrides in the heartbeat's localSettings.
+     */
+    sound: z.object({
+      voiceGuide: z.boolean(),
+      voiceVolume: z.number().int().min(0).max(200),
+      musicOn: z.boolean(),
+      musicTrack: z.enum(['kawaii', 'lofi']),
+      musicVolume: z.number().int().min(0).max(200)
+    }),
+    paper: z.object({
+      photo: z.enum(['4x6', 'a4', 'a5']),
+      badge: z.enum(['4x6', 'a4', 'with-photo'])
+    }),
     payment: z.object({
       enabled: z.boolean(),
+      /** Free use: the kiosk skips payment in every mode (logged as "ไม่เก็บเงิน"). */
+      bypass: z.boolean(),
       mode: z.enum(['test', 'live']),
       email: z.union([z.literal(''), z.email()]),
       qrTimeoutSec: z.number().int().min(60).max(900)
@@ -121,7 +149,7 @@ export function defaultKioskSettings(): KioskSettings {
       ai: { price: 69, allowRegenerate: true }
     },
     photoFulfillment: 'kiosk',
-    brand: { brandName: 'scluo-dio', photoTitle: 'Photo Studio', photoTagline: 'ภาพสีคมชัด ขนาด 4x6 นิ้ว รับภาพทันที' },
+    brand: { brandName: 'scluo-dio', photoTitle: 'Photo Studio', photoTagline: 'ภาพสีคมชัด ขนาด 4x6 นิ้ว รับภาพทันที', printBranding: 'brand' },
     event: { preset: 'general', title: '', subtitle: '', date: '', accent: '' },
     templates: {
       photoLayouts: [],
@@ -132,10 +160,33 @@ export function defaultKioskSettings(): KioskSettings {
       classic: []
     },
     badge: { size: '58', copies: 2 },
-    payment: { enabled: false, mode: 'test', email: '', qrTimeoutSec: 180 },
+    print: { photo: true, badge: true, queueSlip: true, queuePrefix: '', queueOnPhoto: 'off' },
+    attract: { showBadges: true },
+    sound: { voiceGuide: true, voiceVolume: 90, musicOn: true, musicTrack: 'kawaii', musicVolume: 40 },
+    paper: { photo: '4x6', badge: '4x6' },
+    payment: { enabled: false, bypass: false, mode: 'test', email: '', qrTimeoutSec: 180 },
     ai: { demoMode: false },
     share: { enabled: false, retentionDays: 7 },
     idleReturnSec: 120,
     adminPin: null
   };
+}
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+function mergeDefaults(defaults: unknown, value: unknown): unknown {
+  if (!isPlainObject(defaults)) return value === undefined ? defaults : value;
+  if (!isPlainObject(value)) return value === undefined || value === null ? defaults : value;
+  const out: Record<string, unknown> = { ...value };
+  for (const [k, d] of Object.entries(defaults)) out[k] = mergeDefaults(d, value[k]);
+  return out;
+}
+
+/**
+ * A stored revision with every field present: revisions saved before a setting existed get
+ * that setting's default (the same value the kiosk used before it was managed here).
+ * `adminPin` stays as stored (null when missing).
+ */
+export function withSettingsDefaults(raw: unknown): KioskSettings {
+  return mergeDefaults(defaultKioskSettings(), raw) as KioskSettings;
 }

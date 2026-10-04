@@ -5,7 +5,7 @@ import { getOrgContext } from '@/server/auth/context';
 import { SaveConfigInput, rollbackKioskConfig, saveKioskConfig } from '@/server/services/kiosk-config';
 import { runAction, type ActionState } from '@/server/lib/action';
 
-export type SaveConfigResult = ActionState & { revision?: number };
+export type SaveConfigResult = ActionState & { revision?: number; updatedAt?: string };
 
 /** Called directly by the config editor with the whole settings document. */
 export async function saveConfigAction(orgSlug: string, kioskRowId: string, payload: unknown): Promise<SaveConfigResult> {

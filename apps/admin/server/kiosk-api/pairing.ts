@@ -1,9 +1,10 @@
 import 'server-only';
 import { and, eq, gt, isNull } from 'drizzle-orm';
-import { defaultKioskSettings, type PairResponse, type PairRequestSchema } from '@photobooth/contracts';
+import { defaultKioskSettings, withSettingsDefaults, type PairResponse, type PairRequestSchema } from '@photobooth/contracts';
+import { NEW_KIOSK_OWN_SECTIONS } from '@/lib/config-layers';
 import type { z } from 'zod';
 import { db } from '@/server/db/client';
-import { branches, kioskConfigRevisions, kioskPairCodes, kioskTokens, kiosks, organizations } from '@/server/db/schema';
+import { branches, kioskConfigRevisions, kioskPairCodes, kioskTokens, kiosks, orgConfigDefaults, organizations } from '@/server/db/schema';
 import { randomToken, sha256Hex } from '@/server/lib/crypto';
 import { newId } from '@/server/lib/ids';
 import { isDuplicateKey } from '@/server/lib/errors';
@@ -55,8 +56,10 @@ export async function pairKiosk(input: z.output<typeof PairRequestSchema>, ip: s
       await tx.insert(kioskTokens).values({ id: newId('ktk'), orgId: found.org.id, kioskRowId, tokenHash: sha256Hex(token) });
 
       if (revision === 0) {
-        const settings = defaultKioskSettings();
-        settings.identity.name = found.kiosk.name;
+        // Revision 1: the customer's defaults (ค่ากลาง), or the kiosk's own defaults when none are saved
+        const saved = (await tx.select({ settings: orgConfigDefaults.settings }).from(orgConfigDefaults).where(eq(orgConfigDefaults.orgId, found.org.id)).limit(1))[0];
+        const settings = saved ? withSettingsDefaults(saved.settings) : defaultKioskSettings();
+        settings.identity = { ...settings.identity, name: found.kiosk.name, location: '' };
         await tx.insert(kioskConfigRevisions).values({ kioskRowId, revision: 1, orgId: found.org.id, settings, note: 'ค่าเริ่มต้นเมื่อจับคู่ตู้' });
         revision = 1;
       }
@@ -73,6 +76,7 @@ export async function pairKiosk(input: z.output<typeof PairRequestSchema>, ip: s
           appVersion: input.appVersion || null,
           ip,
           currentRevision: revision,
+          ...(found.kiosk.currentRevision === 0 && found.kiosk.ownSections == null ? { ownSections: NEW_KIOSK_OWN_SECTIONS } : {}),
           pairedAt: now,
           revokedAt: null
         })

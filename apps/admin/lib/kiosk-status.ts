@@ -42,6 +42,7 @@ export interface KioskIssueInput {
   printerState: { role: string; name: string; ok: boolean; error?: string }[] | null;
   cameraState: { ok: boolean; error?: string } | null;
   configError?: { revision: number; message: string } | null;
+  emergency?: { since: string; changes: { key: string }[] } | null;
 }
 
 export interface KioskIssue {
@@ -66,6 +67,7 @@ export function kioskIssues(k: KioskIssueInput, now = Date.now()): KioskIssue[] 
   }
   if (k.cameraState && !k.cameraState.ok) issues.push({ level: 'danger', text: `กล้องมีปัญหา${k.cameraState.error ? `: ${k.cameraState.error}` : ''}` });
   if (k.configError) issues.push({ level: 'danger', text: `ตู้ไม่รับการตั้งค่า revision ${k.configError.revision}${k.configError.message ? `: ${k.configError.message}` : ''}` });
+  if (k.emergency) issues.push({ level: 'warn', text: `โหมดฉุกเฉินที่ตู้: แก้ค่าที่ Admin ดูแลไว้ ${k.emergency.changes.length} รายการ` });
   if (k.queueDepth > QUEUE_BACKLOG) issues.push({ level: 'warn', text: `ข้อมูลค้างส่ง ${k.queueDepth} รายการ` });
   const rejectedLatest = !!k.configError && k.configError.revision >= k.currentRevision;
   if (!rejectedLatest && k.appliedRevision != null && k.appliedRevision < k.currentRevision) issues.push({ level: 'info', text: 'รอตู้ใช้การตั้งค่าล่าสุด' });

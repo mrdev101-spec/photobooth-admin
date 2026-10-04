@@ -1,4 +1,4 @@
-import { ChartColumn, Eye, HardDrive, LayoutDashboard, LayoutTemplate, MapPin, MonitorSmartphone, PackageCheck, ReceiptText, ScrollText, Users } from 'lucide-react';
+import { ChartColumn, Eye, Layers, HardDrive, LayoutDashboard, LayoutTemplate, MapPin, MonitorSmartphone, PackageCheck, ReceiptText, ScrollText, Users } from 'lucide-react';
 import { getOrgContext } from '@/server/auth/context';
 import { ORG_ROLE_LABELS, PLATFORM_ROLE_LABELS, can } from '@/server/auth/rbac';
 import { organizationsForUser } from '@/server/services/organizations';
@@ -26,6 +26,7 @@ export default async function OrgLayout({ children, params }: { children: React.
       title: 'ตู้',
       items: ([
         can(p, 'kiosk.view') && { href: `${base}/kiosks`, label: 'ตู้ทั้งหมด', icon: <MonitorSmartphone aria-hidden /> },
+        can(p, 'kiosk.view') && { href: `${base}/events`, label: 'ค่ากลางและงาน', icon: <Layers aria-hidden /> },
         can(p, 'kiosk.view') && { href: `${base}/templates`, label: 'Template', icon: <LayoutTemplate aria-hidden /> }
       ] as (NavItem | false)[]).filter((x): x is NavItem => !!x)
     },

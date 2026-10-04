@@ -2,6 +2,7 @@ import 'server-only';
 import { and, count, eq, gt, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH } from '@photobooth/contracts';
+import { NEW_KIOSK_OWN_SECTIONS } from '@/lib/config-layers';
 import { db } from '@/server/db/client';
 import { branches, kioskPairCodes, kioskTokens, kiosks, organizations, type Kiosk } from '@/server/db/schema';
 import { assertCan, type OrgContext } from '@/server/auth/context';
@@ -102,7 +103,8 @@ export async function createKiosk(ctx: OrgContext, input: z.infer<typeof KioskIn
     throw new AppError(`บัญชีนี้มีตู้ครบ ${ctx.org.kioskQuota} เครื่องตามโควตาแล้ว ติดต่อผู้ดูแลแพลตฟอร์มเพื่อเพิ่ม`, 'conflict');
   }
   const id = newId('ksk');
-  await db().insert(kiosks).values({ id, orgId: ctx.org.id, branchId: input.branchId, name: input.name });
+  // New kiosks follow the customer's defaults / their event except for their name and location
+  await db().insert(kiosks).values({ id, orgId: ctx.org.id, branchId: input.branchId, name: input.name, ownSections: NEW_KIOSK_OWN_SECTIONS });
   await audit(actor(ctx), { action: 'kiosk.create', resourceType: 'kiosk', resourceId: id, after: input });
   return id;
 }

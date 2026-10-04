@@ -199,6 +199,12 @@ export const kiosks = mysqlTable(
     printerState: jsonText<PrinterState[]>('printer_state'),
     cameraState: jsonText<CameraState>('camera_state'),
     localSettings: jsonText<Record<string, unknown>>('local_settings'),
+    /** Settings preset ("งาน") this kiosk follows; null = the customer's defaults (ค่ากลาง). */
+    eventId: id('event_id'),
+    /** Config sections (lib/config-permissions) set on this kiosk itself; the rest follow the event / defaults. null = every section (kiosks from before presets). */
+    ownSections: jsonText<string[]>('own_sections'),
+    /** Emergency mode reported by the kiosk (Admin-owned settings unlocked with the PIN); null = off. */
+    emergency: jsonText<{ since: string; changes: { key: string; value: unknown }[] }>('emergency'),
     lastSeenAt: datetime('last_seen_at', { mode: 'date', fsp: 3 }),
     pairedAt: datetime('paired_at', { mode: 'date', fsp: 3 }),
     revokedAt: datetime('revoked_at', { mode: 'date', fsp: 3 }),
@@ -255,6 +261,31 @@ export const kioskConfigRevisions = mysqlTable(
     createdAt: createdAt()
   },
   (t) => [primaryKey({ columns: [t.kioskRowId, t.revision] }), index('kiosk_config_org_idx').on(t.orgId)]
+);
+
+/** The customer's default kiosk settings (ค่ากลาง): kiosks without an event follow it, new events start from it. */
+export const orgConfigDefaults = mysqlTable('org_config_defaults', {
+  orgId: id('org_id').primaryKey(),
+  settings: jsonText<unknown>('settings').notNull(),
+  updatedBy: id('updated_by'),
+  updatedAt: updatedAt()
+});
+
+/** A settings preset ("งาน") several kiosks follow, e.g. one wedding or fair. */
+export const configEvents = mysqlTable(
+  'config_events',
+  {
+    id: id().primaryKey(),
+    orgId: id('org_id').notNull(),
+    name: varchar('name', { length: 120 }).notNull(),
+    note: varchar('note', { length: 500 }).notNull().default(''),
+    settings: jsonText<unknown>('settings').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    createdBy: id('created_by'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt()
+  },
+  (t) => [index('config_events_org_idx').on(t.orgId, t.isActive)]
 );
 
 /** Fixed-window counters for rate limiting (pairing attempts per IP, Kiosk API per device). */

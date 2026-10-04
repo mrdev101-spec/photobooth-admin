@@ -32,6 +32,7 @@ export async function recordHeartbeat(auth: KioskAuth, data: HeartbeatData, ip: 
       printerState: data.printers,
       cameraState: data.camera ?? null,
       ...(data.localSettings ? { localSettings: data.localSettings } : {}),
+      emergency: data.emergency ?? null,
       ...(data.fingerprint ? { reportedFingerprint: data.fingerprint } : {}),
       // Stays flagged until someone accepts the new machine in the Admin
       ...(mismatch ? { fingerprintMismatch: true } : {})

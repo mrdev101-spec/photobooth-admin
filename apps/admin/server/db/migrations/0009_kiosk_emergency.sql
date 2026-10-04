@@ -1,0 +1,1 @@
+ALTER TABLE `kiosks` ADD `emergency` json;

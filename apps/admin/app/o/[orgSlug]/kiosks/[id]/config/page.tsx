@@ -10,16 +10,11 @@ import { AppError } from '@/server/lib/errors';
 import { Notice, PageHeader } from '@/components/ui';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import { KioskTabs } from '../kiosk-tabs';
-import { ConfigEditor, type EditorCatalog } from './config-editor';
-import { getCatalogState } from '@/server/services/catalog';
-import { catalogItems } from '@/lib/template-visibility';
+import { ConfigEditor } from './config-editor';
+import { editorCatalog } from './editor-catalog';
 
-async function editorCatalog(): Promise<EditorCatalog> {
-  const state = await getCatalogState();
-  const pick = (kind: Parameters<typeof catalogItems>[0]) => catalogItems(kind, state).map(({ id, name, desc }) => ({ id, name, desc }));
-  return { photo: pick('photo-4x6'), badge: pick('badge'), classic: pick('classic'), ai: pick('ai-scene') };
-}
 import { resolvePermissions } from '@/lib/config-permissions';
+import { editorSources } from '@/server/services/config-presets';
 
 export const metadata: Metadata = { title: 'การตั้งค่าตู้' };
 
@@ -72,6 +67,12 @@ export default async function KioskConfigPage({ params }: { params: Promise<{ or
             ตู้ใช้การตั้งค่าล่าสุดแล้ว{lastAck?.status === 'applied' ? ` (${formatRelative(lastAck.receivedAt)})` : ''}
           </Notice>
         ) : null}
+        {kiosk.emergency ? (
+          <Notice tone="warn">
+            ตู้เปิดโหมดฉุกเฉิน (ใส่รหัสผู้ดูแลที่ตู้) ตั้งแต่ {formatDateTime(new Date(kiosk.emergency.since))} • ค่าที่ต่างจาก Admin:{' '}
+            {kiosk.emergency.changes.length ? kiosk.emergency.changes.map((c) => `${c.key} = ${JSON.stringify(c.value)}`).join(', ') : 'ยังไม่มี'} • การตั้งค่าใหม่จาก Admin จะรอจนกว่าเจ้าหน้าที่กด &quot;กลับไปใช้ค่าจาก Admin&quot; ที่ตู้
+          </Notice>
+        ) : null}
         {!canEdit ? <Notice tone="info">คุณดูการตั้งค่าได้อย่างเดียว</Notice> : null}
       </div>
 
@@ -87,6 +88,9 @@ export default async function KioskConfigPage({ params }: { params: Promise<{ or
         permissions={resolvePermissions(ctx.org.configPermissions)}
         isPlatform={!!ctx.principal.platformRole}
         catalog={await editorCatalog()}
+        sources={(await editorSources(ctx)).map((x) => ({ id: x.source.kind === 'event' ? x.source.id : null, label: x.label, settings: x.settings, hasPin: x.hasPin }))}
+        initialEventId={kiosk.eventId}
+        initialOwn={kiosk.ownSections}
       />
     </>
   );

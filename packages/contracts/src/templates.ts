@@ -22,7 +22,9 @@ export const TEMPLATE_TEXT_FIELDS = ['event.title', 'event.subtitle', 'event.dat
 
 /** Canvas rules per kind (px). Classic height is free, within limits. */
 export const TEMPLATE_CANVAS = {
-  'photo-4x6': { widths: [1200], height: 1800, bleed: 36, safe: 60, maxPhotoSlots: 4 },
+  // 1200 x 1800 is the 4x6 print; other shapes (2x6 strip 600 x 1800, 9:16 1013 x 1800...) are
+  // placed on A4 / A5 sheets by the kiosk, so any size from minSide to maxSide is accepted
+  'photo-4x6': { widths: [1200], height: 1800, minSide: 300, maxSide: 1800, bleed: 36, safe: 60, maxPhotoSlots: 4 },
   badge: { widths: [1000], height: 1000, bleed: 0, safe: 0, maxPhotoSlots: 1 },
   classic: { widths: [576, 384], height: null, minHeight: 300, maxHeight: 4000, bleed: 0, safe: 16, maxPhotoSlots: 4 }
 } as const;
@@ -140,6 +142,10 @@ export function frameIssues(kind: Exclude<UploadedTemplateKind, 'ai-scene'>, spe
 /** Problems with an uploaded overlay's pixel size for its kind. */
 export function overlaySizeIssue(kind: Exclude<UploadedTemplateKind, 'ai-scene'>, width: number, height: number): string | null {
   const r = TEMPLATE_CANVAS[kind];
+  if ('minSide' in r) {
+    const bad = (v: number) => !Number.isInteger(v) || v < r.minSide || v > r.maxSide;
+    return bad(width) || bad(height) ? `ด้านกว้างและสูงต้องอยู่ระหว่าง ${r.minSide}-${r.maxSide} px (ไฟล์นี้ ${width} × ${height} px) • ภาพ 4x6 คือ 1200 × 1800` : null;
+  }
   if (!(r.widths as readonly number[]).includes(width)) return `ความกว้างต้องเป็น ${r.widths.join(' หรือ ')} px (ไฟล์นี้ ${width} px)`;
   if (r.height !== null && height !== r.height) return `ความสูงต้องเป็น ${r.height} px (ไฟล์นี้ ${height} px)`;
   if (r.height === null && (height < r.minHeight || height > r.maxHeight)) return `ความสูงต้องอยู่ระหว่าง ${r.minHeight}-${r.maxHeight} px`;

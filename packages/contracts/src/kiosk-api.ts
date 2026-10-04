@@ -67,7 +67,17 @@ export const HeartbeatRequestSchema = z.object({
     .optional(),
   queueDepth: z.number().int().min(0).default(0),
   /** The kiosk-owned (hardware) settings: printers, camera, badge calibration. No secrets. */
-  localSettings: z.record(z.string(), z.unknown()).optional()
+  localSettings: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Emergency mode: staff unlocked the Admin-owned settings at the kiosk with the admin PIN.
+   * `changes` = kiosk config keys that now differ from the Admin's values. Absent = off.
+   */
+  emergency: z
+    .object({
+      since: z.iso.datetime(),
+      changes: z.array(z.object({ key: z.string().max(64), value: z.unknown() })).max(60).default([])
+    })
+    .optional()
 });
 export type HeartbeatRequest = z.input<typeof HeartbeatRequestSchema>;
 export type HeartbeatData = z.output<typeof HeartbeatRequestSchema>;
@@ -113,6 +123,18 @@ export interface KioskConfigResponse {
   /** Encrypted with the device token (node.ts openSecrets); null when the customer has no storage yet. */
   secrets: SealedSecrets | null;
   assets: { manifestRevision: number };
+}
+
+/**
+ * POST /kiosk/config/import: a kiosk that was in use before pairing sends its own settings once,
+ * so the Admin starts from them instead of the defaults. Only accepted while the kiosk still has
+ * the revision created at pairing.
+ */
+export const ConfigImportSchema = z.object({ settings: z.record(z.string(), z.unknown()) });
+export interface ConfigImportResponse {
+  revision: number;
+  /** Values the Admin could not keep (e.g. live payments not allowed for this customer). */
+  adjusted: string[];
 }
 
 export const ConfigAckSchema = z

@@ -57,6 +57,20 @@
       "when": 1790825206613,
       "tag": "0007_kiosk_manifest",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1791104138552,
+      "tag": "0008_config_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "5",
+      "when": 1791105017835,
+      "tag": "0009_kiosk_emergency",
+      "breakpoints": true
     }
   ]
 }

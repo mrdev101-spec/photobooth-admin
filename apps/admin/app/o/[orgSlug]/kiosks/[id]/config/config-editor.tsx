@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { createContext, useContext, useMemo, useState, useTransition, type ReactNode } from 'react';
 import clsx from 'clsx';
-import { Lock, BadgeCheck, Download, Frame, IdCard, LayoutGrid, Palette, QrCode, ReceiptText, ShoppingBag, Sparkles, Timer } from 'lucide-react';
+import { Layers, Link2, Lock, BadgeCheck, Download, Frame, IdCard, LayoutGrid, Music, Palette, Printer, QrCode, ReceiptText, Ruler, ShoppingBag, Sparkles, Timer } from 'lucide-react';
 import {
   AI_SCENES,
   APP_MODES,
@@ -16,10 +16,30 @@ import {
 import type { KioskSettings } from '@photobooth/contracts';
 import { buttonClass } from '@/components/ui';
 import { saveConfigAction, type SaveConfigResult } from './actions';
-import { DEFAULT_CONFIG_PERMISSIONS, type ConfigPermissions, type ConfigSectionId, type PermissionLevel } from '@/lib/config-permissions';
+import { CONFIG_SECTIONS, DEFAULT_CONFIG_PERMISSIONS, type ConfigPermissions, type ConfigSectionId, type PermissionLevel } from '@/lib/config-permissions';
+import { ALWAYS_OWN, normalizeOwnSections } from '@/lib/config-layers';
 
 export type EditableSettings = Omit<KioskSettings, 'adminPin'>;
 type PinChange = { action: 'keep' } | { action: 'clear' } | { action: 'set'; pin: string };
+
+/** A settings layer a kiosk can follow (ค่ากลาง or an event); `id` null = ค่ากลาง. */
+export interface EditorSource {
+  id: string | null;
+  label: string;
+  settings: EditableSettings;
+  hasPin: boolean;
+}
+
+/** What the editor sends; kiosks use baseRevision + layers, presets use baseUpdatedAt. */
+export interface ConfigSavePayload {
+  baseRevision: number;
+  baseUpdatedAt: string | null;
+  settings: EditableSettings;
+  pin: PinChange;
+  note: string;
+  eventId?: string | null;
+  ownSections?: string[];
+}
 
 interface Props {
   orgSlug: string;
@@ -35,6 +55,16 @@ interface Props {
   isPlatform?: boolean;
   /** Templates that can be shown right now (built-in not retired + published uploaded). */
   catalog?: EditorCatalog;
+  /** 'preset' = ค่ากลาง / an event: no identity section, no layers. */
+  scope?: 'kiosk' | 'preset';
+  /** Presets: the updatedAt the page loaded (conflict check). */
+  baseUpdatedAt?: string | null;
+  /** Presets: their own save action (kiosks use saveConfigAction). */
+  saveAction?: (payload: ConfigSavePayload) => Promise<SaveConfigResult>;
+  /** Kiosks: the layers it can follow, the one it follows and the sections it sets itself. */
+  sources?: EditorSource[];
+  initialEventId?: string | null;
+  initialOwn?: string[] | null;
 }
 
 type CatalogEntry = { id: string; name: string; desc?: string };
@@ -48,6 +78,17 @@ const BUILTIN_EDITOR_CATALOG: EditorCatalog = { photo: [...PHOTO_LAYOUTS], badge
 
 // ─── permissions: locked parts are read-only (with a lock badge), hidden parts are not shown ──
 const LevelContext = createContext<(id: ConfigSectionId) => PermissionLevel>(() => 'edit');
+/** Sections that follow ค่ากลาง / an event: the label of that layer, or null when the kiosk sets them. */
+const InheritContext = createContext<(id: ConfigSectionId) => string | null>(() => null);
+
+function InheritBadge({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-primary-50 px-2.5 py-0.5 text-xs font-medium text-primary-700 ring-1 ring-primary-200 ring-inset">
+      <Link2 className="size-3" aria-hidden />
+      ตาม{label}
+    </span>
+  );
+}
 
 function LockBadge() {
   return (
@@ -80,6 +121,7 @@ function setIn<T>(obj: T, path: string, value: unknown): T {
 // ─── field widgets ──────────────────────────────────────────────────────────
 function Section({ title, hint, icon, children, dim, perm }: { title: string; hint?: string; icon?: ReactNode; children: ReactNode; dim?: boolean; perm?: ConfigSectionId }) {
   const level = useContext(LevelContext)(perm ?? 'identity');
+  const inherited = useContext(InheritContext)(perm ?? 'identity');
   if (perm && level === 'hidden') return null;
   const locked = !!perm && level === 'view';
   return (
@@ -90,7 +132,7 @@ function Section({ title, hint, icon, children, dim, perm }: { title: string; hi
           <h2 className="text-lg leading-tight font-semibold text-ink-900">{title}</h2>
           {hint ? <p className="mt-0.5 text-sm text-ink-500">{hint}</p> : null}
         </div>
-        {locked ? <LockBadge /> : null}
+        {perm && inherited ? <InheritBadge label={inherited} /> : locked ? <LockBadge /> : null}
       </header>
       <fieldset disabled={locked} className="grid gap-5 p-5 sm:grid-cols-2">
         {children}
@@ -207,18 +249,73 @@ function PickList({ label, all, value, onChange, disabled, error }: { label: str
 }
 
 // ─── editor ─────────────────────────────────────────────────────────────────
-export function ConfigEditor({ orgSlug, kioskRowId, baseRevision, initial, hasPin, canEdit, livePaymentsAllowed, storageConfigured, permissions = DEFAULT_CONFIG_PERMISSIONS, isPlatform = false, catalog = BUILTIN_EDITOR_CATALOG }: Props) {
-  const levelOf = (id: ConfigSectionId): PermissionLevel => (isPlatform ? 'edit' : permissions[id]);
+export function ConfigEditor({
+  orgSlug,
+  kioskRowId,
+  baseRevision,
+  initial,
+  hasPin,
+  canEdit,
+  livePaymentsAllowed,
+  storageConfigured,
+  permissions = DEFAULT_CONFIG_PERMISSIONS,
+  isPlatform = false,
+  catalog = BUILTIN_EDITOR_CATALOG,
+  scope = 'kiosk',
+  baseUpdatedAt = null,
+  saveAction,
+  sources = [],
+  initialEventId = null,
+  initialOwn = null
+}: Props) {
   const router = useRouter();
   const [s, setS] = useState<EditableSettings>(initial);
+  // Layers (kiosks only): which ค่ากลาง / event it follows and the sections it sets itself
+  const layered = scope === 'kiosk' && sources.length > 0;
+  const [eventId, setEventId] = useState<string | null>(initialEventId);
+  const [own, setOwn] = useState<string[]>(() => normalizeOwnSections(initialOwn));
+  const source = sources.find((x) => x.id === eventId) ?? sources[0];
+  const inheritedOf = (id: ConfigSectionId): string | null => (layered && source && !own.includes(id) ? source.label : null);
+  const levelOf = (id: ConfigSectionId): PermissionLevel => (inheritedOf(id) ? 'view' : isPlatform ? 'edit' : permissions[id]);
   // The last saved state: baseline for "dirty", target of "cancel", base of the next save
-  const [saved, setSaved] = useState<{ settings: EditableSettings; revision: number; hasPin: boolean }>({ settings: initial, revision: baseRevision, hasPin });
+  const [saved, setSaved] = useState<{ settings: EditableSettings; revision: number; hasPin: boolean; base: string | null; eventId: string | null; own: string[] }>({
+    settings: initial,
+    revision: baseRevision,
+    hasPin,
+    base: baseUpdatedAt,
+    eventId: initialEventId,
+    own: normalizeOwnSections(initialOwn)
+  });
   const [pin, setPin] = useState<PinChange>({ action: 'keep' });
   const [note, setNote] = useState('');
   const [showAll, setShowAll] = useState(false);
   const [result, setResult] = useState<SaveConfigResult | null>(null);
   const [pending, start] = useTransition();
-  const dirty = useMemo(() => JSON.stringify(s) !== JSON.stringify(saved.settings) || pin.action !== 'keep', [s, saved, pin]);
+  const dirty = useMemo(
+    () => JSON.stringify(s) !== JSON.stringify(saved.settings) || pin.action !== 'keep' || eventId !== saved.eventId || JSON.stringify(own) !== JSON.stringify(saved.own),
+    [s, saved, pin, eventId, own]
+  );
+
+  /** `prev` with the given sections' values taken from a layer. */
+  const fromSource = (prev: EditableSettings, ids: readonly string[], src: EditorSource | undefined) => {
+    if (!src) return prev;
+    let next = prev;
+    for (const sec of CONFIG_SECTIONS) {
+      if (!ids.includes(sec.id)) continue;
+      for (const path of sec.paths) next = setIn(next, path, structuredClone((src.settings as Record<string, unknown>)[path]));
+    }
+    return next;
+  };
+  const toggleOwn = (id: ConfigSectionId, mine: boolean) => {
+    setOwn((prev) => normalizeOwnSections(mine ? [...prev, id] : prev.filter((x) => x !== id)));
+    // Back to inherited: show the layer's values right away
+    if (!mine) setS((prev) => fromSource(prev, [id], source));
+  };
+  const pickSource = (id: string | null) => {
+    setEventId(id);
+    const next = sources.find((x) => x.id === id) ?? sources[0];
+    setS((prev) => fromSource(prev, CONFIG_SECTIONS.map((x) => x.id).filter((x) => !own.includes(x)), next));
+  };
   const e = result?.fieldErrors ?? {};
   const err = (path: string) => e[path] ?? e[`settings.${path}`];
   const set = (path: string) => (v: unknown) => setS((prev) => setIn(prev, path, v));
@@ -247,10 +344,18 @@ export function ConfigEditor({ orgSlug, kioskRowId, baseRevision, initial, hasPi
 
   const save = () =>
     start(async () => {
-      const r = await saveConfigAction(orgSlug, kioskRowId, { baseRevision: saved.revision, settings: s, pin, note });
+      const payload: ConfigSavePayload = { baseRevision: saved.revision, baseUpdatedAt: saved.base, settings: s, pin, note, ...(layered ? { eventId, ownSections: own } : {}) };
+      const r = saveAction ? await saveAction(payload) : await saveConfigAction(orgSlug, kioskRowId, payload);
       setResult(r);
       if (r.ok) {
-        setSaved({ settings: s, revision: r.revision ?? saved.revision, hasPin: pin.action === 'set' ? true : pin.action === 'clear' ? false : saved.hasPin });
+        setSaved({
+          settings: s,
+          revision: r.revision ?? saved.revision,
+          hasPin: pin.action === 'set' ? true : pin.action === 'clear' ? false : saved.hasPin,
+          base: r.updatedAt ?? saved.base,
+          eventId,
+          own
+        });
         setPin({ action: 'keep' });
         setNote('');
         router.refresh();
@@ -263,6 +368,7 @@ export function ConfigEditor({ orgSlug, kioskRowId, baseRevision, initial, hasPi
 
   return (
     <LevelContext.Provider value={levelOf}>
+    <InheritContext.Provider value={inheritedOf}>
     <form
       onSubmit={(ev) => {
         ev.preventDefault();
@@ -281,6 +387,50 @@ export function ConfigEditor({ orgSlug, kioskRowId, baseRevision, initial, hasPi
           </span>
         ) : null}
       </div>
+      {layered ? (
+        <section className="overflow-hidden rounded-card border border-primary-200 bg-surface shadow-card">
+          <header className="flex items-start gap-3 border-b border-ink-100 px-5 py-3">
+            <span className="mt-0.5 text-primary-600 [&>svg]:size-5">
+              <Layers aria-hidden />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-lg leading-tight font-semibold text-ink-900">ที่มาของการตั้งค่า</h2>
+              <p className="mt-0.5 text-sm text-ink-500">หมวดที่ไม่ได้ตั้งเฉพาะตู้นี้ ใช้ค่าจากงานที่เลือก (หรือค่ากลาง) และเปลี่ยนตามเมื่อมีคนแก้งานนั้น</p>
+            </div>
+          </header>
+          <fieldset disabled={ro} className="flex flex-col gap-4 p-5">
+            <label className="flex max-w-md flex-col gap-1.5">
+              <span className="text-sm font-medium text-ink-700">ตู้นี้ใช้ค่าของ</span>
+              <select className={inputCls()} value={eventId ?? ''} onChange={(ev) => pickSource(ev.target.value || null)} aria-label="ตู้นี้ใช้ค่าของ">
+                {sources.map((x) => (
+                  <option key={x.id ?? ''} value={x.id ?? ''}>
+                    {x.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div>
+              <p className="mb-2 text-sm font-medium text-ink-700">ตั้งเฉพาะตู้นี้ (ไม่ตาม{source?.label})</p>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {CONFIG_SECTIONS.filter((x) => !ALWAYS_OWN.includes(x.id) && (isPlatform || permissions[x.id] !== 'hidden')).map((x) => {
+                  const mine = own.includes(x.id);
+                  const canFlip = isPlatform || permissions[x.id] === 'edit';
+                  return (
+                    <label key={x.id} className={clsx('flex items-start gap-2 rounded-lg border p-2.5 text-sm', mine ? 'border-primary-600 bg-ink-50' : 'border-ink-200', !canFlip && 'opacity-60')}>
+                      <input type="checkbox" className="mt-0.5 size-4" checked={mine} disabled={!canFlip} onChange={(ev) => toggleOwn(x.id, ev.target.checked)} />
+                      <span>
+                        <span className="font-medium">{x.label}</span>
+                        <span className="block text-xs text-ink-500">{mine ? 'ตั้งที่ตู้นี้' : `ตาม${source?.label}`}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          </fieldset>
+        </section>
+      ) : null}
+
       <Section title="โหมดตู้" perm="mode" icon={<LayoutGrid aria-hidden />} hint="ตู้เปลี่ยนโหมดเมื่อกลับถึงหน้าแรก">
         <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2 lg:grid-cols-4">
           {APP_MODES.map((m) => (
@@ -295,6 +445,8 @@ export function ConfigEditor({ orgSlug, kioskRowId, baseRevision, initial, hasPi
         </div>
       </Section>
 
+
+      {scope === 'kiosk' ? (
       <Section title="ตัวตนตู้" perm="identity" icon={<IdCard aria-hidden />}>
         <Text label="ชื่อตู้บนหน้าจอ" value={s.identity.name} onChange={set('identity.name')} error={err('identity.name')} disabled={ro} maxLength={100} />
         <Text label="สถานที่" value={s.identity.location} onChange={set('identity.location')} error={err('identity.location')} disabled={ro} maxLength={200} />
@@ -302,6 +454,7 @@ export function ConfigEditor({ orgSlug, kioskRowId, baseRevision, initial, hasPi
           <Text label="ชื่อจุดรับรูป" value={s.identity.pickupStationName} onChange={set('identity.pickupStationName')} error={err('identity.pickupStationName')} disabled={ro} maxLength={100} hint="พิมพ์บนใบรับรูป" />
         ) : null}
       </Section>
+      ) : null}
 
       {show('photo') ? (
         <Section title="สินค้าและราคา (Photo 4x6)" perm="products" icon={<ShoppingBag aria-hidden />} hint="เปิดขายอย่างเดียวจะข้ามหน้าเลือกสินค้า">
@@ -387,6 +540,19 @@ export function ConfigEditor({ orgSlug, kioskRowId, baseRevision, initial, hasPi
         <Text label="ชื่องาน" value={s.event.title} onChange={set('event.title')} error={err('event.title')} disabled={ro} maxLength={80} />
         <Text label="ข้อความรอง" value={s.event.subtitle} onChange={set('event.subtitle')} error={err('event.subtitle')} disabled={ro} maxLength={120} />
         <Text label="วันที่บนภาพ" value={s.event.date} onChange={set('event.date')} error={err('event.date')} disabled={ro} maxLength={40} hint="เว้นว่าง = วันที่ของวันนั้น" />
+        <Choice
+          label="ชื่อแบรนด์บนภาพและเข็มกลัด"
+          value={s.brand.printBranding}
+          options={[
+            { id: 'brand', name: 'แสดงชื่อแบรนด์' },
+            { id: 'none', name: 'ไม่แสดง (เฉพาะข้อความงาน)' }
+          ]}
+          onChange={set('brand.printBranding')}
+          disabled={ro}
+        />
+        {show('photo') ? (
+          <Toggle label="แสดงตัวอย่างเข็มกลัดในหน้าแรก" hint="ลอยข้างภาพ 4x6 ในหน้า Animation เมื่อขายเข็มกลัด" checked={s.attract.showBadges} onChange={set('attract.showBadges')} disabled={ro} />
+        ) : null}
       </Section>
 
       {show('photo') ? (
@@ -409,7 +575,81 @@ export function ConfigEditor({ orgSlug, kioskRowId, baseRevision, initial, hasPi
         </Section>
       ) : null}
 
+      {show('photo') ? (
+        <Section title="การพิมพ์และใบคิว" perm="print" icon={<Printer aria-hidden />} hint="ลูกค้ายังซื้อได้ตามเดิม เช่น ขายภาพ + เข็มกลัดแต่ทำเข็มกลัดที่โต๊ะเจ้าหน้าที่ • ภาพดิจิทัลผ่าน QR ได้ครบ">
+          <div className="flex flex-col gap-3">
+            <Toggle label="ตู้พิมพ์ภาพ (4x6 / แผ่นภาพ)" checked={s.print.photo} onChange={set('print.photo')} disabled={ro} />
+            <Toggle label="ตู้พิมพ์เข็มกลัด" checked={s.print.badge} onChange={set('print.badge')} disabled={ro} />
+          </div>
+          <div className="flex flex-col gap-3">
+            <Toggle label="พิมพ์ใบคิวให้ลูกค้า" hint="หมายเลขคิว + QR ที่เครื่องพิมพ์ใบเสร็จ ก่อนพิมพ์ภาพ • คิวเริ่ม 001 ใหม่ทุกวัน" checked={s.print.queueSlip} onChange={set('print.queueSlip')} disabled={ro} />
+          </div>
+          <Text label="ตัวอักษรหน้าเลขคิว" value={s.print.queuePrefix} onChange={(v) => set('print.queuePrefix')(v.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 3))} error={err('print.queuePrefix')} disabled={ro || !s.print.queueSlip} maxLength={3} hint="เช่น A ได้ A001 • ว่าง = 001" />
+          <Choice
+            label="เลขคิวบนภาพ"
+            value={s.print.queueOnPhoto}
+            options={[
+              { id: 'off', name: 'ไม่พิมพ์บนภาพ' },
+              { id: 'corner', name: 'พิมพ์เล็กๆ ที่มุมภาพ' }
+            ]}
+            onChange={set('print.queueOnPhoto')}
+            disabled={ro || !s.print.queueSlip}
+          />
+        </Section>
+      ) : null}
+
+      {show('photo', 'pickup') ? (
+        <Section title="กระดาษ" perm="paper" icon={<Ruler aria-hidden />} hint="ค่าเริ่มต้นของตู้ ช่างที่หน้างานปรับเองได้ (ตู้รายงานค่าที่ปรับไว้ใน &quot;ค่าฝั่งตู้&quot;) • การจัดวางบนแผ่น ขอบ และการชดเชยขนาดตั้งที่ตู้">
+          <Choice
+            label="กระดาษของเครื่องพิมพ์ภาพ"
+            value={s.paper.photo}
+            options={[
+              { id: '4x6', name: 'กระดาษ 4x6' },
+              { id: 'a4', name: 'กระดาษโฟโต้ A4' },
+              { id: 'a5', name: 'กระดาษโฟโต้ A5' }
+            ]}
+            onChange={set('paper.photo')}
+            disabled={ro}
+          />
+          <Choice
+            label="กระดาษเข็มกลัด"
+            value={s.paper.badge}
+            options={[
+              { id: '4x6', name: 'แผ่น 4x6 ของตัวเอง' },
+              { id: 'a4', name: 'แผ่น A4 / A5 ของตัวเอง' },
+              { id: 'with-photo', name: 'รวมในแผ่นเดียวกับภาพ (A4 / A5)' }
+            ]}
+            onChange={set('paper.badge')}
+            disabled={ro}
+          />
+        </Section>
+      ) : null}
+
+      {show('photo') ? (
+        <Section title="เสียงและเพลง" perm="sound" icon={<Music aria-hidden />} hint="ค่าเริ่มต้นของตู้ เจ้าหน้าที่ปรับความดังที่ตู้ได้ตามสถานที่">
+          <div className="flex flex-col gap-3">
+            <Toggle label="เสียงพูดแนะนำลูกค้า" checked={s.sound.voiceGuide} onChange={set('sound.voiceGuide')} disabled={ro} />
+            <Num label="ระดับเสียงพูด" value={s.sound.voiceVolume} onChange={set('sound.voiceVolume')} error={err('sound.voiceVolume')} disabled={ro || !s.sound.voiceGuide} min={0} max={200} suffix="%" />
+          </div>
+          <div className="flex flex-col gap-3">
+            <Toggle label="เพลงหน้าแรก" hint="เล่นเบาลงระหว่างลูกค้าใช้งาน" checked={s.sound.musicOn} onChange={set('sound.musicOn')} disabled={ro} />
+            <Choice
+              label="เพลง"
+              value={s.sound.musicTrack}
+              options={[
+                { id: 'kawaii', name: 'Kawaii pop (สดใส)' },
+                { id: 'lofi', name: 'Lo-fi (นุ่มสบาย)' }
+              ]}
+              onChange={set('sound.musicTrack')}
+              disabled={ro || !s.sound.musicOn}
+            />
+            <Num label="ระดับเสียงเพลง" value={s.sound.musicVolume} onChange={set('sound.musicVolume')} error={err('sound.musicVolume')} disabled={ro || !s.sound.musicOn} min={0} max={200} suffix="%" />
+          </div>
+        </Section>
+      ) : null}
+
       <Section title="การรับเงิน" perm="payment" icon={<QrCode aria-hidden />} hint="QR PromptPay สร้างโดยระบบกลาง">
+        <Toggle label="ใช้ฟรี (ไม่เก็บเงิน)" hint="ข้ามหน้าชำระเงินทุกโหมด บันทึกเป็น &quot;ไม่เก็บเงิน&quot; เช่น งานที่ลูกค้าจ้างเหมา" checked={s.payment.bypass} onChange={set('payment.bypass')} disabled={ro} />
         <Toggle label="เปิดรับเงิน" hint="ปิด = จำลองการจ่ายเงิน (ไม่เก็บเงินจริง)" checked={s.payment.enabled} onChange={set('payment.enabled')} disabled={ro} />
         <Choice
           label="โหมด"
@@ -476,6 +716,8 @@ export function ConfigEditor({ orgSlug, kioskRowId, baseRevision, initial, hasPi
                 className={buttonClass('ghost')}
                 onClick={() => {
                   setS(saved.settings);
+                  setEventId(saved.eventId);
+                  setOwn(saved.own);
                   setPin({ action: 'keep' });
                   setResult(null);
                 }}
@@ -493,6 +735,7 @@ export function ConfigEditor({ orgSlug, kioskRowId, baseRevision, initial, hasPi
         </div>
       ) : null}
     </form>
+    </InheritContext.Provider>
     </LevelContext.Provider>
   );
 }

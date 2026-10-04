@@ -8,14 +8,17 @@ export type PermissionLevel = 'edit' | 'view' | 'hidden';
 
 export const CONFIG_SECTIONS = [
   { id: 'identity', label: 'ตัวตนตู้', desc: 'ชื่อตู้ สถานที่ ชื่อจุดรับรูป', paths: ['identity'] },
-  { id: 'brand', label: 'แบรนด์และธีมงาน', desc: 'ชื่อแบรนด์ หัวข้อ ชื่องาน สีธีม', paths: ['brand', 'event'] },
+  { id: 'brand', label: 'แบรนด์และธีมงาน', desc: 'ชื่อแบรนด์ หัวข้อ ชื่องาน สีธีม ตัวอย่างเข็มกลัดหน้าแรก', paths: ['brand', 'event', 'attract'] },
   { id: 'products', label: 'สินค้าและราคา', desc: 'สินค้าที่ขาย ราคา (รวม Classic และ AI) การรับภาพ', paths: ['products', 'photoFulfillment'] },
   { id: 'templates', label: 'กรอบภาพและฉาก AI', desc: 'กรอบ 4x6 กรอบเข็มกลัด แบบ Classic ฉาก AI ที่เปิด', paths: ['templates'] },
   { id: 'badge', label: 'เข็มกลัด', desc: 'ขนาดและจำนวนต่อออเดอร์', paths: ['badge'] },
+  { id: 'print', label: 'การพิมพ์และใบคิว', desc: 'สิ่งที่ตู้พิมพ์ ใบคิว หมายเลขคิวบนภาพ', paths: ['print'] },
+  { id: 'paper', label: 'กระดาษ', desc: 'ขนาดกระดาษภาพ (4x6 / A4 / A5) และกระดาษเข็มกลัด • ค่าเริ่มต้น ตู้ปรับเองได้', paths: ['paper'] },
+  { id: 'sound', label: 'เสียงและเพลง', desc: 'เสียงพูดแนะนำ เพลงหน้าแรก ระดับเสียง • ค่าเริ่มต้น ตู้ปรับเองได้', paths: ['sound'] },
   { id: 'share', label: 'ดาวน์โหลดภาพ (QR)', desc: 'เปิด QR และจำนวนวันที่เก็บภาพ', paths: ['share'] },
   { id: 'behavior', label: 'พฤติกรรมตู้และรหัสผู้ดูแล', desc: 'เวลากลับหน้าแรก รหัสเข้าหน้า Config ของตู้', paths: ['idleReturnSec', 'adminPin'] },
   { id: 'mode', label: 'โหมดตู้', desc: 'Classic / AI Studio / Photo 4x6 / จุดรับรูป', paths: ['appMode'] },
-  { id: 'payment', label: 'การรับเงิน', desc: 'เปิดรับเงิน โหมด อีเมล เวลาหมดอายุ QR', paths: ['payment'] },
+  { id: 'payment', label: 'การรับเงิน', desc: 'เปิดรับเงิน ใช้ฟรี โหมด อีเมล เวลาหมดอายุ QR', paths: ['payment'] },
   { id: 'ai', label: 'AI (โหมดสาธิต)', desc: 'จำลองผล AI ในตู้', paths: ['ai'] }
 ] as const;
 
@@ -29,6 +32,9 @@ export const DEFAULT_CONFIG_PERMISSIONS: ConfigPermissions = {
   products: 'edit',
   templates: 'edit',
   badge: 'edit',
+  print: 'edit',
+  paper: 'edit',
+  sound: 'edit',
   share: 'edit',
   behavior: 'edit',
   mode: 'view',

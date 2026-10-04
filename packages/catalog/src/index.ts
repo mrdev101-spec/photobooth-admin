@@ -53,6 +53,7 @@ export const PHOTO_FILTERS = [
 
 export const BADGE_SIZES = [
   { id: '32', name: '32 มม. (1¼")', face: 32, cut: 44, safe: 27 },
+  { id: '38', name: '38 มม. (1½")', face: 38, cut: 48, safe: 33 },
   { id: '44', name: '44 มม. (1¾")', face: 44, cut: 54, safe: 38 },
   { id: '58', name: '58 มม. (2¼")', face: 58, cut: 70, safe: 50 },
   { id: '75', name: '75 มม. (3")', face: 75, cut: 85, safe: 68 }

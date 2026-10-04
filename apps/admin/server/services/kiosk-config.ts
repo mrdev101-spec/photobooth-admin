@@ -2,7 +2,7 @@ import 'server-only';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { AI_SCENE_IDS, BADGE_FRAME_IDS, CLASSIC_TEMPLATE_IDS, PHOTO_LAYOUT_IDS } from '@photobooth/catalog';
-import { KioskSettingsBaseSchema, KioskSettingsSchema, type KioskSettings } from '@photobooth/contracts';
+import { KioskSettingsBaseSchema, KioskSettingsSchema, withSettingsDefaults, type KioskSettings } from '@photobooth/contracts';
 import { hashAdminPin } from '@photobooth/contracts/node';
 import { db, type Db } from '@/server/db/client';
 import { catalogTemplates, configAcks, kioskConfigRevisions, kiosks, orgStorage, users, type Kiosk } from '@/server/db/schema';
@@ -13,6 +13,34 @@ import { AppError, notFound } from '@/server/lib/errors';
 import { diffSettings } from '@/lib/settings-diff';
 import { CONFIG_SECTIONS, lockedChanges, resolvePermissions } from '@/lib/config-permissions';
 import { getKiosk } from './kiosks';
+import { sourceFor } from './config-sources';
+import { composeSettings, normalizeOwnSections } from '@/lib/config-layers';
+import { configEvents } from '@/server/db/schema';
+
+/** `base` with the given sections taken from `from`. */
+function onlySections(base: KioskSettings, from: KioskSettings, sections: readonly string[]): KioskSettings {
+  const out: Record<string, unknown> = { ...base };
+  for (const sec of CONFIG_SECTIONS) if (sections.includes(sec.id)) for (const p of sec.paths) out[p] = (from as Record<string, unknown>)[p];
+  return out as KioskSettings;
+}
+
+async function assertEvent(ctx: OrgContext, eventId: string) {
+  const ev = (await db().select({ id: configEvents.id, isActive: configEvents.isActive }).from(configEvents).where(and(eq(configEvents.id, eventId), eq(configEvents.orgId, ctx.org.id))).limit(1))[0];
+  if (!ev) throw notFound('งาน');
+  if (!ev.isActive) throw new AppError('งานนี้ปิดแล้ว เลือกงานอื่น หรือใช้ค่ากลาง');
+}
+
+/**
+ * Customers may only switch a section between "own" and "inherited" when they can edit it; a
+ * different event changes every inherited section, so it needs every inherited section editable.
+ */
+function checkLayerPermissions(ctx: OrgContext, before: string[], after: string[], eventChanged: boolean) {
+  if (ctx.principal.platformRole) return;
+  const perms = resolvePermissions(ctx.org.configPermissions);
+  const flipped = CONFIG_SECTIONS.filter((s) => before.includes(s.id) !== after.includes(s.id) || (eventChanged && !after.includes(s.id)));
+  const locked = flipped.filter((s) => perms[s.id] !== 'edit');
+  if (locked.length) throw new AppError(`หมวดนี้จัดการโดยผู้ให้บริการ เปลี่ยนที่มาของค่าไม่ได้: ${locked.map((s) => s.label).join(', ')}`, 'forbidden');
+}
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
@@ -24,6 +52,10 @@ export const PinChange = z.discriminatedUnion('action', [
 
 export const SaveConfigInput = z.object({
   baseRevision: z.number().int().min(0),
+  /** Where the sections the kiosk doesn't set itself come from (null = ค่ากลาง); omitted = unchanged. */
+  eventId: z.string().max(32).nullable().optional(),
+  /** Sections set on this kiosk itself (lib/config-layers); omitted = unchanged. */
+  ownSections: z.array(z.string().max(32)).max(20).optional(),
   /** The editor never sees the PIN hash; adminPin comes from `pin`. */
   settings: KioskSettingsBaseSchema.omit({ adminPin: true }),
   pin: PinChange,
@@ -34,7 +66,7 @@ export const SaveConfigInput = z.object({
  * Appends revision `expected + 1`. The UPDATE … WHERE current_revision = expected makes two
  * concurrent saves impossible: the second one changes 0 rows and gets a conflict.
  */
-async function appendRevision(tx: Tx, kiosk: Pick<Kiosk, 'id' | 'orgId'>, expected: number, settings: KioskSettings, note: string, userId: string | null): Promise<number> {
+export async function appendRevision(tx: Tx, kiosk: Pick<Kiosk, 'id' | 'orgId'>, expected: number, settings: KioskSettings, note: string, userId: string | null): Promise<number> {
   const [res] = await tx
     .update(kiosks)
     .set({ currentRevision: expected + 1 })
@@ -51,11 +83,11 @@ async function revisionRow(kioskRowId: string, revision: number) {
 export async function currentSettings(kiosk: Pick<Kiosk, 'id' | 'currentRevision'>): Promise<{ revision: number; settings: KioskSettings; createdAt: Date } | null> {
   if (!kiosk.currentRevision) return null;
   const r = await revisionRow(kiosk.id, kiosk.currentRevision);
-  return r ? { revision: r.revision, settings: r.settings as KioskSettings, createdAt: r.createdAt } : null;
+  return r ? { revision: r.revision, settings: withSettingsDefaults(r.settings), createdAt: r.createdAt } : null;
 }
 
 /** Rules that need the database or the customer's account, on top of the schema. */
-async function checkBusinessRules(ctx: OrgContext, s: KioskSettings) {
+export async function checkBusinessRules(ctx: OrgContext, s: KioskSettings) {
   const issues: Record<string, string> = {};
   if (s.payment.enabled && s.payment.mode === 'live' && !ctx.org.livePaymentsAllowed) {
     issues['payment.mode'] = 'บัญชีนี้ยังไม่ได้รับอนุญาตให้รับเงินจริง ใช้โหมดทดสอบไปก่อน';
@@ -91,7 +123,7 @@ async function checkBusinessRules(ctx: OrgContext, s: KioskSettings) {
  * Customers may only change the sections the platform left editable (docs §17.4). Checked
  * here so a direct API call cannot bypass the locked fields in the editor.
  */
-function checkPermissions(ctx: OrgContext, before: KioskSettings | null, after: KioskSettings) {
+export function checkPermissions(ctx: OrgContext, before: KioskSettings | null, after: KioskSettings) {
   if (ctx.principal.platformRole || !before) return;
   const locked = lockedChanges(resolvePermissions(ctx.org.configPermissions), before, after);
   if (!locked.length) return;
@@ -120,12 +152,26 @@ export async function saveKioskConfig(ctx: OrgContext, kioskRowId: string, input
 
   const current = await currentSettings(kiosk);
   const adminPin = input.pin.action === 'set' ? hashAdminPin(input.pin.pin) : input.pin.action === 'clear' ? null : (current?.settings.adminPin ?? null);
-  const settings = KioskSettingsSchema.parse({ ...input.settings, adminPin });
-  checkPermissions(ctx, current?.settings ?? null, settings);
+  const own = KioskSettingsSchema.parse({ ...input.settings, adminPin });
+
+  // Layers: sections the kiosk doesn't set itself come from its event / the defaults
+  const eventId = input.eventId === undefined ? kiosk.eventId : input.eventId;
+  if (eventId && eventId !== kiosk.eventId) await assertEvent(ctx, eventId);
+  const ownSections = input.ownSections === undefined ? normalizeOwnSections(kiosk.ownSections) : normalizeOwnSections(input.ownSections);
+  const layersChanged = eventId !== kiosk.eventId || JSON.stringify(ownSections) !== JSON.stringify(normalizeOwnSections(kiosk.ownSections));
+  if (layersChanged) checkLayerPermissions(ctx, normalizeOwnSections(kiosk.ownSections), ownSections, eventId !== kiosk.eventId);
+  const { settings: sourceSettings } = await sourceFor(ctx.org.id, eventId ?? null);
+  const settings = composeSettings(own, sourceSettings, ownSections);
+  // Values typed here: only the kiosk's own sections (inherited ones change with their source,
+  // and switching a section's source is checked by checkLayerPermissions)
+  checkPermissions(ctx, current?.settings ?? null, current ? onlySections(current.settings, settings, ownSections) : settings);
   await checkBusinessRules(ctx, settings);
 
+  if (layersChanged) {
+    await db().update(kiosks).set({ eventId: eventId ?? null, ownSections }).where(eq(kiosks.id, kiosk.id));
+  }
   const changes = diffSettings(current?.settings ?? null, settings);
-  if (current && !changes.length) return { revision: current.revision, changed: false };
+  if (current && !changes.length) return { revision: current.revision, changed: layersChanged };
 
   const revision = await db().transaction((tx) => appendRevision(tx, kiosk, input.baseRevision, settings, input.note, ctx.user.id));
   await audit({ user: ctx.user, orgId: ctx.org.id, actingAsPlatform: ctx.actingAsPlatform }, {
@@ -149,7 +195,7 @@ export async function rollbackKioskConfig(ctx: OrgContext, kioskRowId: string, t
       .limit(1)
   )[0];
   if (!old) throw notFound('revision');
-  const settings = KioskSettingsSchema.parse(old.settings);
+  const settings = KioskSettingsSchema.parse(withSettingsDefaults(old.settings));
   checkPermissions(ctx, (await currentSettings(kiosk))?.settings ?? null, settings);
   await checkBusinessRules(ctx, settings);
   const revision = await db().transaction((tx) => appendRevision(tx, kiosk, baseRevision, settings, `ย้อนกลับไป revision ${toRevision}`, ctx.user.id));
@@ -184,7 +230,8 @@ export async function listRevisions(ctx: OrgContext, kioskRowId: string) {
       note: r.note,
       createdAt: r.createdAt,
       userName: r.userName,
-      changes: diffSettings(rows[i + 1]?.settings ?? null, r.settings),
+      // Older revisions lack newer settings: compare both with defaults filled in
+      changes: diffSettings(rows[i + 1] ? withSettingsDefaults(rows[i + 1]!.settings) : null, withSettingsDefaults(r.settings)),
       ack: acks.find((a) => a.revision === r.revision) ?? null
     }))
   };

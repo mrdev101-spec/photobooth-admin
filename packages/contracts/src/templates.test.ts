@@ -34,7 +34,10 @@ describe('frame spec', () => {
 
   it('checks overlay pixel sizes per kind', () => {
     expect(overlaySizeIssue('photo-4x6', 1200, 1800)).toBeNull();
-    expect(overlaySizeIssue('photo-4x6', 1000, 1500)).toMatch('1200');
+    expect(overlaySizeIssue('photo-4x6', 600, 1800)).toBeNull(); // 2x6 strip
+    expect(overlaySizeIssue('photo-4x6', 1013, 1800)).toBeNull(); // 9:16
+    expect(overlaySizeIssue('photo-4x6', 200, 1800)).toMatch('300-1800');
+    expect(overlaySizeIssue('photo-4x6', 1200, 2400)).toMatch('300-1800');
     expect(overlaySizeIssue('badge', 1000, 1000)).toBeNull();
     expect(overlaySizeIssue('classic', 384, 1200)).toBeNull();
     expect(overlaySizeIssue('classic', 576, 100)).toMatch('ความสูง');
