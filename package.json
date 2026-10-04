@@ -1,0 +1,20 @@
+{
+  "name": "photobooth-admin",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "npm run dev -w @photobooth/admin",
+    "build": "npm run build -w @photobooth/admin",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "db:generate": "npm run db:generate -w @photobooth/admin",
+    "db:migrate": "npm run db:migrate -w @photobooth/admin",
+    "db:seed": "npm run db:seed -w @photobooth/admin"
+  }
+}

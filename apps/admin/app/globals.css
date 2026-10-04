@@ -1,0 +1,179 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design tokens — Photobooth Admin: orange and white (based on the Car Rent Flow system layout)
+ * - Primary: orange. 500 (#f97316, bright) for accents and focus; 600 (#c94a0a) for buttons,
+ *   links and text on white (4.7:1 with white text, WCAG AA); neutral ink grays; white surfaces
+ * - shadcn/ui (components/ui/*) reads the same colours through the variables in :root below
+ * - Sarabun 17px, lucide icons only, no emoji
+ * - NO gradients, glow or neon effects anywhere
+ * Platform Console = dark (ink-900) sidebar; customer space = white sidebar, so it is always
+ * obvious whether you act on the whole platform or inside one customer.
+ */
+@theme {
+  --font-sans: var(--font-thai), 'Sarabun', 'TH Sarabun New', ui-sans-serif, system-ui, sans-serif;
+
+  --color-primary-50: #fff7ed;
+  --color-primary-100: #ffedd5;
+  --color-primary-200: #fed7aa;
+  --color-primary-300: #fdba74;
+  --color-primary-400: #fb923c;
+  --color-primary-500: #f97316;
+  --color-primary-600: #c94a0a;
+  --color-primary-700: #a63c08;
+  --color-primary-800: #86300a;
+  --color-primary-900: #6e290c;
+
+  --color-ink-50: #f7f7f8;
+  --color-ink-100: #eeeef0;
+  --color-ink-200: #dcdce0;
+  --color-ink-300: #c2c2c8;
+  --color-ink-400: #9a9aa3;
+  --color-ink-500: #74747e;
+  --color-ink-600: #5a5a63;
+  --color-ink-700: #45454c;
+  --color-ink-800: #2d2d33;
+  --color-ink-900: #1c1c20;
+
+  --color-surface: #ffffff;
+  --color-canvas: #faf8f6;
+
+  --color-success-50: #ecf8f1;
+  --color-success-600: #1f8a4c;
+  --color-success-700: #186d3c;
+  --color-warning-50: #fdf6e7;
+  --color-warning-600: #b7791f;
+  --color-warning-700: #93600f;
+  --color-info-50: #eaf2fb;
+  --color-info-600: #2463a8;
+  --color-info-700: #1c4f87;
+  --color-danger-50: #fdf2f3;
+  --color-danger-600: #c8102e;
+  --color-danger-700: #a70d26;
+  --color-violet-50: #f3f0fb;
+  --color-violet-600: #6246b0;
+
+  --radius-card: 0.75rem;
+  --shadow-card: 0 1px 2px 0 rgb(28 28 32 / 0.06);
+
+  /* Aliases for the first-generation token names still used in a few places */
+  --color-bg: #faf8f6;
+  --color-surface-2: #f7f7f8;
+  --color-text: #1c1c20;
+  --color-text-2: #5a5a63;
+  --color-text-3: #74747e;
+  --color-primary-fg: #ffffff;
+  --color-ok: #186d3c;
+  --color-ok-bg: #ecf8f1;
+  --color-warn: #93600f;
+  --color-warn-bg: #fdf6e7;
+  --color-danger: #c8102e;
+  --color-danger-bg: #fdf2f3;
+  --color-muted-bg: #eeeef0;
+  --color-info: #1c4f87;
+  --color-info-bg: #eaf2fb;
+  --color-platform: #1c1c20;
+  --color-platform-bg: #eeeef0;
+}
+
+/* shadcn/ui colour variables, mapped onto the tokens above */
+:root {
+  --radius: 0.75rem;
+  --background: #ffffff;
+  --foreground: #1c1c20;
+  --card: #ffffff;
+  --card-foreground: #1c1c20;
+  --popover: #ffffff;
+  --popover-foreground: #1c1c20;
+  --primary: #c94a0a;
+  --primary-foreground: #ffffff;
+  --secondary: #fff7ed;
+  --secondary-foreground: #86300a;
+  --muted: #eeeef0;
+  --muted-foreground: #5a5a63;
+  --accent: #ffedd5;
+  --accent-foreground: #6e290c;
+  --destructive: #c8102e;
+  --border: #dcdce0;
+  --input: #dcdce0;
+  --ring: #f97316;
+  --chart-1: #f97316;
+  --chart-2: #c94a0a;
+  --chart-3: #fdba74;
+  --chart-4: #45454c;
+  --chart-5: #9a9aa3;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1c1c20;
+  --sidebar-primary: #c94a0a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #fff7ed;
+  --sidebar-accent-foreground: #86300a;
+  --sidebar-border: #dcdce0;
+  --sidebar-ring: #f97316;
+}
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  html {
+    font-size: 17px;
+    -webkit-text-size-adjust: 100%;
+  }
+  @media (max-width: 767px) {
+    html {
+      font-size: 16.5px;
+    }
+  }
+  body {
+    @apply bg-canvas font-sans text-ink-900 antialiased;
+    line-height: 1.55;
+    font-feature-settings: 'tnum' 1;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-primary-500);
+    outline-offset: 2px;
+  }
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']) {
+    cursor: pointer;
+  }
+}

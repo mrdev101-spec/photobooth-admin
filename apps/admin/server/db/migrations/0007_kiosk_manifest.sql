@@ -1,0 +1,1 @@
+ALTER TABLE `kiosks` ADD `manifest_revision` int;
