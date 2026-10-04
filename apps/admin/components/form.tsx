@@ -4,7 +4,17 @@ import { createContext, startTransition, useActionState, useContext, useEffect, 
 import clsx from 'clsx';
 import { Copy, KeyRound, LoaderCircle } from 'lucide-react';
 import { initialActionState, type ActionState } from '@/lib/action-state';
-import { buttonClass } from './ui';
+import { buttonClass, FieldLabel } from './ui';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from './ui/alert-dialog';
 
 type ServerAction = (state: ActionState, form: FormData) => Promise<ActionState>;
 
@@ -15,7 +25,8 @@ const FormPendingContext = createContext(false);
  * Form bound to a server action. Children are plain server-rendered inputs; field errors
  * render through <FieldError name>, the result message and one-time passwords below.
  * Submits in a transition instead of <form action>, because React resets a form after a
- * form action — a failed submit would wipe what the user typed.
+ * form action — a failed submit would wipe what the user typed. `confirm` asks first in a
+ * dialog (shadcn AlertDialog) with the form's data kept until the answer.
  */
 export function ActionForm({
   action,
@@ -33,6 +44,8 @@ export function ActionForm({
   const [state, formAction, pending] = useActionState(action, initialActionState);
   const ref = useRef<HTMLFormElement>(null);
   const [hydrated, setHydrated] = useState(false);
+  // The submit waiting for the confirm dialog
+  const [asking, setAsking] = useState<FormData | null>(null);
   useEffect(() => setHydrated(true), []);
   useEffect(() => {
     if (state.ok && resetOnSuccess) ref.current?.reset();
@@ -52,14 +65,41 @@ export function ActionForm({
           action={hydrated ? undefined : formAction}
           onSubmit={(e) => {
             e.preventDefault();
-            if (pending || (confirm && !window.confirm(confirm))) return;
+            if (pending) return;
             const data = new FormData(e.currentTarget);
+            if (confirm) {
+              setAsking(data);
+              return;
+            }
             startTransition(() => formAction(data));
           }}
         >
           {children}
           <FormResult state={state} />
         </form>
+        {confirm ? (
+          <AlertDialog open={asking !== null} onOpenChange={(open) => { if (!open) setAsking(null); }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>ยืนยันการทำรายการ</AlertDialogTitle>
+                <AlertDialogDescription className="text-base text-ink-600">{confirm}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel className={buttonClass('secondary')}>ยกเลิก</AlertDialogCancel>
+                <AlertDialogAction
+                  className={buttonClass('primary')}
+                  onClick={() => {
+                    const data = asking;
+                    setAsking(null);
+                    if (data) startTransition(() => formAction(data));
+                  }}
+                >
+                  ยืนยัน
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        ) : null}
       </FormPendingContext.Provider>
     </FormStateContext.Provider>
   );
@@ -86,10 +126,7 @@ export function FormField({ label, name, hint, required, children }: { label: st
   const error = state.fieldErrors?.[name];
   return (
     <div className="flex flex-col gap-1.5">
-      <label htmlFor={name} className="text-sm font-medium text-ink-700">
-        {label}
-        {required ? <span className="ml-0.5 text-primary-600">*</span> : null}
-      </label>
+      <FieldLabel htmlFor={name} label={label} required={required} />
       {children}
       {error ? <p className="text-sm text-danger-600">{error}</p> : hint ? <p className="text-sm text-ink-500">{hint}</p> : null}
     </div>
