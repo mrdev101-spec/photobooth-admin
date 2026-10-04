@@ -8,7 +8,8 @@ import { effectiveStatus, listOrders, salesSummary } from '@/server/services/ord
 import { listKiosks } from '@/server/services/kiosks';
 import { AutoRefresh } from '@/components/auto-refresh';
 import { RangeFilter } from '@/components/range-filter';
-import { Badge, EmptyState, PageHeader, Select, StatCard, Table, Td, Th, buttonClass } from '@/components/ui';
+import { EmptyState, PageHeader, Select, StatCard, buttonClass } from '@/components/ui';
+import { OrdersTable } from './orders-table';
 import { resolveRange } from '@/lib/date-range';
 import { FLAG_LABELS, PAYMENT_LABELS, productLabel, statusLabel } from '@/lib/order-labels';
 import { formatBaht, formatNumber } from '@/lib/format';
@@ -104,67 +105,28 @@ export default async function OrdersPage({
       </form>
 
       {rows.length ? (
-        <Table>
-          <thead>
-            <tr>
-              <Th>เวลา</Th>
-              <Th>ภาพ</Th>
-              <Th>รายการ</Th>
-              <Th>ตู้</Th>
-              <Th>การรับภาพ</Th>
-              <Th>สถานะ</Th>
-              <Th className="text-right">ยอด</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((o) => {
-              const st = statusLabel(effectiveStatus(o), o.fulfillment);
-              const pay = PAYMENT_LABELS[o.paymentKind]!;
-              const thumb = o.files.find((f) => f.kind === 'photo' || f.kind === 'ai' || f.kind === 'badge');
-              return (
-                <tr key={o.id} className="hover:bg-ink-50">
-                  <Td className="whitespace-nowrap text-ink-600">
-                    {o.orderedAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                  </Td>
-                  <Td>
-                    {thumb ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={thumb.url} alt="" loading="lazy" className="h-12 w-8 rounded border border-ink-200 bg-ink-50 object-cover" />
-                    ) : (
-                      <span className="block h-12 w-8 rounded border border-ink-200 bg-ink-100" />
-                    )}
-                  </Td>
-                  <Td>
-                    <Link href={`${base}/${o.id}`} className="font-semibold text-ink-900 hover:underline">
-                      {productLabel(o.product, o.mode)}
-                    </Link>
-                    {o.code ? <div className="font-mono text-sm text-ink-500">{formatPickupCode(o.code)}</div> : null}
-                  </Td>
-                  <Td className="text-ink-700">{o.kioskName}</Td>
-                  <Td className="text-ink-700">{o.fulfillment === 'pickup' ? 'จุดรับรูป' : 'พิมพ์ที่ตู้'}</Td>
-                  <Td>
-                    <Badge tone={st.tone} dot>
-                      {st.label}
-                    </Badge>
-                  </Td>
-                  <Td className="text-right whitespace-nowrap">
-                    <span className="font-semibold text-ink-900">{formatBaht(o.amountSatang / 100)}</span>
-                    {o.paymentKind !== 'live' ? (
-                      <div>
-                        <Badge tone={pay.tone}>{pay.label}</Badge>
-                        {o.flags?.map((f) => (
-                          <span key={f} title={FLAG_LABELS[f] ?? f}>
-                            <Badge tone="danger">ตรวจสอบ</Badge>
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </Td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </Table>
+        <OrdersTable
+          base={base}
+          rows={rows.map((o) => {
+            const st = statusLabel(effectiveStatus(o), o.fulfillment);
+            const pay = PAYMENT_LABELS[o.paymentKind]!;
+            const thumb = o.files.find((f) => f.kind === 'photo' || f.kind === 'ai' || f.kind === 'badge');
+            return {
+              id: o.id,
+              orderedAt: o.orderedAt.toISOString(),
+              timeLabel: o.orderedAt.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
+              thumbUrl: thumb?.url ?? null,
+              product: productLabel(o.product, o.mode),
+              code: o.code ? formatPickupCode(o.code) : null,
+              kioskName: o.kioskName,
+              fulfillment: o.fulfillment,
+              status: { label: st.label, tone: st.tone },
+              amountSatang: o.amountSatang,
+              payment: { live: o.paymentKind === 'live', label: pay.label, tone: pay.tone },
+              flags: (o.flags ?? []).map((f) => ({ id: f, label: FLAG_LABELS[f] ?? f }))
+            };
+          })}
+        />
       ) : (
         <EmptyState title="ไม่มีออเดอร์ในช่วงนี้" icon={<ReceiptText aria-hidden />}>
           ออเดอร์จะเข้ามาอัตโนมัติเมื่อลูกค้าซื้อที่ตู้

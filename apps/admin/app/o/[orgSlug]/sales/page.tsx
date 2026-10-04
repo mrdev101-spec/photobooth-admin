@@ -4,6 +4,7 @@ import { requireOrg } from '@/server/auth/context';
 import { salesSummary } from '@/server/services/orders';
 import { RangeFilter } from '@/components/range-filter';
 import { Card, EmptyState, PageHeader, StatCard, Table, Td, Th, buttonClass } from '@/components/ui';
+import { SalesBreakdown } from './sales-tables';
 import { resolveRange } from '@/lib/date-range';
 import { PRODUCT_LABELS } from '@/lib/order-labels';
 import { formatBaht, formatNumber } from '@/lib/format';
@@ -76,45 +77,11 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
           </Card>
 
           <Card flush title="ตามตู้" icon={<MonitorSmartphone aria-hidden />}>
-            <Table bare>
-              <thead>
-                <tr>
-                  <Th>ตู้</Th>
-                  <Th className="text-right">ออเดอร์</Th>
-                  <Th className="text-right">ยอด</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {s.byKiosk.map((k) => (
-                  <tr key={k.kioskRowId}>
-                    <Td className="font-semibold text-ink-900">{k.name}</Td>
-                    <Td className="text-right">{formatNumber(k.orders)}</Td>
-                    <Td className="text-right">{formatBaht(k.liveSatang / 100)}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+            <SalesBreakdown nameHeader="ตู้" rows={s.byKiosk.map((k) => ({ key: k.kioskRowId, name: k.name, orders: k.orders, liveSatang: k.liveSatang }))} />
           </Card>
 
           <Card flush title="ตามสินค้า" icon={<Package aria-hidden />}>
-            <Table bare>
-              <thead>
-                <tr>
-                  <Th>สินค้า</Th>
-                  <Th className="text-right">ออเดอร์</Th>
-                  <Th className="text-right">ยอด</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {s.byProduct.map((p) => (
-                  <tr key={p.product}>
-                    <Td className="font-semibold text-ink-900">{PRODUCT_LABELS[p.product] ?? p.product}</Td>
-                    <Td className="text-right">{formatNumber(p.orders)}</Td>
-                    <Td className="text-right">{formatBaht(p.liveSatang / 100)}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
+            <SalesBreakdown nameHeader="สินค้า" rows={s.byProduct.map((p) => ({ key: p.product, name: PRODUCT_LABELS[p.product] ?? p.product, orders: p.orders, liveSatang: p.liveSatang }))} />
           </Card>
         </div>
       ) : (
