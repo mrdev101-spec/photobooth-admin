@@ -22,6 +22,8 @@ export function AppShell({
   showPlatformLink,
   banner,
   sidebarFooter,
+  headerActions,
+  extraTitles = [],
   children
 }: {
   variant?: 'org' | 'platform';
@@ -33,6 +35,10 @@ export function AppShell({
   showPlatformLink: boolean;
   banner?: ReactNode;
   sidebarFooter?: ReactNode;
+  /** Shortcuts in the top bar, left of the account menu. */
+  headerActions?: ReactNode;
+  /** Pages reached from the top bar (not the sidebar), for the header title. */
+  extraTitles?: NavSection['items'];
   children: ReactNode;
 }) {
   const dark = variant === 'platform';
@@ -52,7 +58,8 @@ export function AppShell({
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-ink-200 bg-surface px-4 lg:px-6">
           <MobileNavButton sections={nav} dark={dark} brand={brand} footer={footer} />
-          <HeaderTitle sections={nav} fallback={dark ? 'Platform Console' : 'Photobooth Admin'} />
+          <HeaderTitle sections={extraTitles.length ? [...nav, { items: extraTitles }] : nav} fallback={dark ? 'Platform Console' : 'Photobooth Admin'} />
+          {headerActions}
           <UserMenu name={user.name} email={user.email} roleLabel={roleLabel} orgs={orgs} currentSlug={currentSlug} showPlatformLink={showPlatformLink} logout={logoutAction} />
         </header>
         {banner}

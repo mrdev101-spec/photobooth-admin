@@ -278,7 +278,12 @@ export function Notice({ tone = 'info', title, children, className }: { tone?: '
     <UiAlert role={tone === 'danger' ? 'alert' : 'status'} className={cn('has-[>svg]:gap-x-3 [&>svg]:size-5 [&>svg]:translate-y-0', s.box, className)}>
       <s.Icon aria-hidden />
       {title ? <AlertTitle className="line-clamp-none font-semibold">{title}</AlertTitle> : null}
-      {children ? <AlertDescription className="text-sm text-current">{children}</AlertDescription> : null}
+      {/* One wrapper: AlertDescription is a grid, so loose text and <b> would each take a row */}
+      {children ? (
+        <AlertDescription className="text-sm text-current">
+          <div className="min-w-0">{children}</div>
+        </AlertDescription>
+      ) : null}
     </UiAlert>
   );
 }

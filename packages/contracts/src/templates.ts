@@ -92,13 +92,60 @@ export const FrameSpecSchema = z.object({
 });
 export type FrameSpec = z.infer<typeof FrameSpecSchema>;
 
-/** AI poster scene: reference images live in `files`, the prompt is used by the Admin's AI calls. */
+const line = (max: number) => z.string().trim().max(max);
+
+/**
+ * How the Admin's AI draws a customer into an uploaded scene (the same brief the built-in scenes
+ * keep in server/ai/scene-prompts.ts). Server-side only: never sent to kiosks.
+ */
+export const AiSceneBriefSchema = z.object({
+  /** poster = movie-poster composition; postcard = travel photo with the place behind. */
+  style: z.enum(['poster', 'postcard']).default('poster'),
+  /** The title is Thai: drawn by a GPT Image model (others misspell Thai). */
+  thaiText: z.boolean().default(false),
+  genre: line(200).min(2, 'ใส่แนวภาพ (เช่น bold cyberpunk action)'),
+  title: line(80).default(''),
+  titleStyle: line(200).default(''),
+  titlePos: line(120).default(''),
+  tagline: line(120).default(''),
+  taglinePos: line(120).default(''),
+  setting: line(600).min(5, 'ใส่ฉากและสถานที่'),
+  lighting: line(300).min(3, 'ใส่แสงของฉาก'),
+  female: line(300).min(3, 'ใส่ชุดของผู้หญิง'),
+  male: line(300).min(3, 'ใส่ชุดของผู้ชาย'),
+  hairFemale: line(300).min(3, 'ใส่ทรงผมผู้หญิง'),
+  hairMale: line(300).min(3, 'ใส่ทรงผมผู้ชาย'),
+  pose: line(300).default(''),
+  framing: line(200).default(''),
+  camera: line(300).default('')
+});
+export type AiSceneBrief = z.infer<typeof AiSceneBriefSchema>;
+
+/**
+ * AI poster scene: the art lives in `files` (plate + samples). Uploaded scenes carry `brief`,
+ * which the Admin's AI uses; built-in ones keep theirs in code. `prompt` = free notes / the
+ * request the brief was written from.
+ */
 export const AiSceneSpecSchema = z.object({
-  prompt: z.string().trim().min(20, 'คำอธิบายฉากสั้นเกินไป').max(4000),
+  prompt: z.string().trim().max(4000).default(''),
   baseGender: z.enum(['female', 'male', 'any']).default('any'),
-  accent: color.default('#C8102E')
+  accent: color.default('#C8102E'),
+  /** Kiosk menu tab (AI_SCENE_CATEGORIES). */
+  category: z.string().regex(/^[a-z0-9-]{1,24}$/).default('special'),
+  /** Second line on the kiosk card (e.g. the Thai name). */
+  subName: line(80).default(''),
+  brief: AiSceneBriefSchema.optional()
 });
 export type AiSceneSpec = z.infer<typeof AiSceneSpecSchema>;
+
+/** What kiosks get of an AI scene (no brief / notes: those stay on the Admin). */
+export type AiScenePublicSpec = Pick<AiSceneSpec, 'baseGender' | 'accent' | 'category' | 'subName'>;
+export const publicAiSpec = (s: Partial<AiSceneSpec>): AiScenePublicSpec => ({
+  baseGender: s.baseGender ?? 'any',
+  accent: s.accent ?? '#C8102E',
+  category: s.category ?? 'special',
+  subName: s.subName ?? ''
+});
 
 export type TemplateSpec = FrameSpec | AiSceneSpec;
 
@@ -163,8 +210,8 @@ export interface ManifestTemplate {
   tags: string[];
   /** Frames: overlay/sample/preview. AI scenes: plate/female/male/preview. URLs are absolute. */
   files: TemplateFiles;
-  /** FrameSpec fields for frames (background, photoSlots, textSlots, defaultFilter); AiSceneSpec for AI scenes. */
-  spec: TemplateSpec;
+  /** FrameSpec fields for frames (background, photoSlots, textSlots, defaultFilter); the public part for AI scenes. */
+  spec: FrameSpec | AiScenePublicSpec;
 }
 
 export interface AssetManifestResponse {

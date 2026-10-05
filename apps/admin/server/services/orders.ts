@@ -2,7 +2,7 @@ import 'server-only';
 import { and, asc, desc, eq, gte, inArray, lt, or, sql, type SQL } from 'drizzle-orm';
 import { parsePickupInput } from '@photobooth/contracts';
 import { db } from '@/server/db/client';
-import { branches, kiosks, orderFiles, orders, organizations, users, type Order, type OrderFile, type OrderStatus } from '@/server/db/schema';
+import { branches, kiosks, orderFiles, orders, organizations, orgStorage, users, type Order, type OrderFile, type OrderStatus } from '@/server/db/schema';
 import { assertCan, type OrgContext, type PlatformContext } from '@/server/auth/context';
 import { can } from '@/server/auth/rbac';
 import { branchWhere, orgWhere } from '@/server/tenancy/scoped';
@@ -25,6 +25,21 @@ export const TZ_OFFSET_HOURS = 7;
 /** A pickup order past its expiry that was never collected shows as expired. */
 export function effectiveStatus(o: Pick<Order, 'status' | 'expiresAt'>, now = Date.now()): OrderStatus {
   return o.status === 'uploaded' && o.expiresAt && o.expiresAt.getTime() < now ? 'expired' : o.status;
+}
+
+/**
+ * Until when an order's full-quality originals are in the shop's R2: a pickup order's own expiry,
+ * else the shop's "ลบภาพหลัง" (the lifecycle rule on p/) counted from the sale. null = no R2.
+ */
+export async function originalsUntil(o: Pick<Order, 'orgId' | 'orderedAt' | 'expiresAt'>): Promise<Date | null> {
+  if (o.expiresAt) return o.expiresAt;
+  const s = (await db().select({ days: orgStorage.lifecycleDays }).from(orgStorage).where(eq(orgStorage.orgId, o.orgId)).limit(1))[0];
+  return s ? new Date(o.orderedAt.getTime() + s.days * 86_400_000) : null;
+}
+
+/** The R2 address the shop's files are served from (only these are fetched for downloads). */
+export async function storagePublicUrl(orgId: string): Promise<string | null> {
+  return (await db().select({ url: orgStorage.publicUrl }).from(orgStorage).where(eq(orgStorage.orgId, orgId)).limit(1))[0]?.url ?? null;
 }
 
 async function withFiles(rows: (Order & { kioskName: string; branchName: string | null })[]): Promise<OrderRow[]> {
@@ -91,7 +106,7 @@ export async function findOrderByPickupInput(ctx: OrgContext, input: string): Pr
 }
 
 /** Pickup counter: orders waiting (oldest first) and the latest handovers. */
-export async function pickupQueue(ctx: OrgContext) {
+export async function pickupQueue(ctx: OrgContext, filter: { eventId?: string | null } = {}) {
   assertCan(ctx, 'pickup.use');
   const now = new Date();
   const waiting = await baseSelect()
@@ -101,6 +116,7 @@ export async function pickupQueue(ctx: OrgContext) {
         orders.orgId,
         branchWhere(ctx, orders.branchId),
         eq(orders.fulfillment, 'pickup'),
+        filter.eventId ? eq(orders.eventId, filter.eventId) : undefined,
         inArray(orders.status, ['uploaded', 'claimed']),
         or(sql`${orders.expiresAt} IS NULL`, gte(orders.expiresAt, now))
       )
@@ -108,7 +124,7 @@ export async function pickupQueue(ctx: OrgContext) {
     .orderBy(asc(orders.orderedAt))
     .limit(200);
   const recent = await baseSelect()
-    .where(orgWhere(ctx, orders.orgId, branchWhere(ctx, orders.branchId), eq(orders.fulfillment, 'pickup'), eq(orders.status, 'handed_over')))
+    .where(orgWhere(ctx, orders.orgId, branchWhere(ctx, orders.branchId), eq(orders.fulfillment, 'pickup'), filter.eventId ? eq(orders.eventId, filter.eventId) : undefined, eq(orders.status, 'handed_over')))
     .orderBy(desc(orders.handedOverAt))
     .limit(10);
   return { waiting: await withFiles(flatten(waiting)), recent: await withFiles(flatten(recent)) };

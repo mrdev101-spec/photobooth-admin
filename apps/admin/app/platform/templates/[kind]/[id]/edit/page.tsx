@@ -92,7 +92,8 @@ export default async function EditTemplatePage({ params }: { params: Promise<{ k
           files={{ plate: fileOf(base.files, 'plate') ?? undefined, female: fileOf(base.files, 'female') ?? undefined, male: fileOf(base.files, 'male') ?? undefined }}
           draftVersion={s.draft?.version ?? null}
           hasPublished={!!s.published}
-          issues={publishIssues(k, base)}
+          issues={publishIssues(k, base, { uploaded: s.template.source === 'uploaded' })}
+          uploaded={s.template.source === 'uploaded'}
         />
       ) : (
         <FrameEditor

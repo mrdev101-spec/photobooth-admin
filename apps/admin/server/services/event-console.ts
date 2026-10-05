@@ -207,3 +207,46 @@ export async function consoleFeed(ctx: OrgContext, filter: ConsoleFilter = {}): 
     commands: cmdRows.map((c) => ({ id: c.id, type: c.type, status: c.status, message: c.message, orderId: typeof c.payload.orderId === 'string' ? c.payload.orderId : null, createdAt: c.createdAt.toISOString() }))
   };
 }
+
+export interface StudioEvent {
+  /** Event id, or 'all' = every kiosk of the customer. */
+  key: string;
+  name: string;
+  kiosks: number;
+  online: number;
+  ordersToday: number;
+}
+
+/** Event Studio entry: the customer's live events (and "all kiosks") with today's numbers. */
+export async function studioEvents(ctx: OrgContext): Promise<StudioEvent[]> {
+  assertCan(ctx, 'console.view');
+  const events = await consoleEvents(ctx);
+  const kioskRows = await db()
+    .select({ id: kiosks.id, eventId: kiosks.eventId, status: kiosks.status, lastSeenAt: kiosks.lastSeenAt })
+    .from(kiosks)
+    .where(orgWhere(ctx, kiosks.orgId, inArray(kiosks.status, [...LIVE]), branchWhere(ctx, kiosks.branchId)));
+  const from = startOfThaiDay(new Date());
+  const counts = await db()
+    .select({ eventId: orders.eventId, n: sql<number>`count(*)` })
+    .from(orders)
+    .where(orgWhere(ctx, orders.orgId, branchWhere(ctx, orders.branchId), gte(orders.orderedAt, from), lt(orders.orderedAt, new Date(from.getTime() + 86_400_000))))
+    .groupBy(orders.eventId);
+  const now = Date.now();
+  const stats = (rows: typeof kioskRows) => ({ kiosks: rows.length, online: rows.filter((k) => connectionOf(k, now) === 'online').length });
+  return [
+    ...events.map((e) => ({
+      key: e.id,
+      name: e.name,
+      ...stats(kioskRows.filter((k) => k.eventId === e.id)),
+      ordersToday: Number(counts.find((c) => c.eventId === e.id)?.n ?? 0)
+    })),
+    { key: 'all', name: 'ตู้ทั้งหมด', ...stats(kioskRows), ordersToday: counts.reduce((n, c) => n + Number(c.n), 0) }
+  ];
+}
+
+/** The event of a studio URL ('all' or one of the customer's live events), or null. */
+export async function studioEvent(ctx: OrgContext, key: string): Promise<{ key: string; id: string | null; name: string } | null> {
+  if (key === 'all') return { key, id: null, name: 'ตู้ทั้งหมด' };
+  const ev = (await consoleEvents(ctx)).find((e) => e.id === key);
+  return ev ? { key, id: ev.id, name: ev.name } : null;
+}

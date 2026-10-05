@@ -143,6 +143,10 @@ export const KioskSettingsBaseSchema = z.object({
     }),
     /** What the kiosk prints (an order may still sell more, e.g. badges made at the staff desk). */
     print: z.object({
+      /** Printing at all (every mode). Off = the customer gets the photo on screen + download QR. */
+      enabled: z.boolean(),
+      /** Shown on the last screen when nothing is printed (empty = the kiosk's own words). */
+      noPrintNote: z.string().trim().max(160),
       photo: z.boolean(),
       badge: z.boolean(),
       queueSlip: z.boolean(),
@@ -162,6 +166,14 @@ export const KioskSettingsBaseSchema = z.object({
       musicVolume: z.number().int().min(0).max(200)
     }),
     paper: z.object({
+      /** Classic receipt width; auto = the kiosk's printer profile. */
+      classic: z.enum(['auto', '58mm', '80mm']),
+      /**
+       * AI Studio print: auto = by the kiosk's printer (as before); receipt = black-and-white on
+       * the receipt printer; 4x6 = with the caption bar; 4x6-full = full bleed; a4 / a5 = the
+       * 2:3 slot of the sheet layout, on the photo printer.
+       */
+      ai: z.enum(['auto', 'receipt', '4x6', '4x6-full', 'a4', 'a5']),
       photo: z.enum(['4x6', 'a4', 'a5']),
       badge: z.enum(['4x6', 'a4', 'with-photo']),
       /** Sheet layouts per paper size; null = the kiosk's preset. */
@@ -230,10 +242,10 @@ export function defaultKioskSettings(): KioskSettings {
       classic: []
     },
     badge: { size: '58', copies: 2 },
-    print: { photo: true, badge: true, queueSlip: true, queuePrefix: '', queueOnPhoto: 'off' },
+    print: { enabled: true, noPrintNote: '', photo: true, badge: true, queueSlip: true, queuePrefix: '', queueOnPhoto: 'off' },
     attract: { showBadges: true },
     sound: { voiceGuide: true, voiceVolume: 90, musicOn: true, musicTrack: 'kawaii', musicVolume: 40 },
-    paper: { photo: '4x6', badge: '4x6', a4Layout: null, a5Layout: null },
+    paper: { classic: 'auto', ai: 'auto', photo: '4x6', badge: '4x6', a4Layout: null, a5Layout: null },
     decor: {},
     payment: { enabled: false, bypass: false, mode: 'test', email: '', qrTimeoutSec: 180 },
     ai: { demoMode: false },

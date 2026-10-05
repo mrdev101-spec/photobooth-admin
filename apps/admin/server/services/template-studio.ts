@@ -64,14 +64,24 @@ export const NewTemplateInput = z.object({
   tags: z
     .string()
     .default('')
-    .transform((v) => [...new Set(v.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean))].slice(0, 8))
+    .transform((v) => [...new Set(v.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean))].slice(0, 8)),
+  /** Platform only: a template for one customer (only its kiosks get it; not on its quota). */
+  forOrgId: z
+    .string()
+    .trim()
+    .max(32)
+    .default('')
+    .transform((v) => v || null)
 });
 
 export const TemplateInfoInput = NewTemplateInput.pick({ name: true, description: true, tags: true });
 
+/** Kinds that count against a customer's template quota (the platform's AI scenes for it don't). */
+const quotaKinds = <T extends { kind: string }>(rows: T[]): T[] => rows.filter((r) => (SHOP_TEMPLATE_KINDS as readonly string[]).includes(r.kind));
+
 /** Starting point for a new frame: one photo window inside the safe area. */
 export function defaultSpec(kind: UploadedTemplateKind): TemplateSpec {
-  if (kind === 'ai-scene') return { prompt: '', baseGender: 'any', accent: '#C8102E' } as AiSceneSpec;
+  if (kind === 'ai-scene') return { prompt: '', baseGender: 'any', accent: '#C8102E', category: 'special', subName: '' } as AiSceneSpec;
   if (kind === 'badge') return { background: '#FFFFFF', photoSlots: [{ shape: 'circle', cx: 500, cy: 500, r: 330, focus: 'face' }], textSlots: [], defaultFilter: 'natural' };
   const w = TEMPLATE_CANVAS[kind].widths[0];
   const h = kind === 'classic' ? 900 : TEMPLATE_CANVAS['photo-4x6'].height;
@@ -99,7 +109,7 @@ async function ownedRow(ctx: StudioActor, kind: UploadedTemplateKind, id: string
 
 /** A customer's own templates (drafts + published count against its quota). */
 export async function shopTemplates(orgId: string) {
-  const rows = await db().select().from(catalogTemplates).where(eq(catalogTemplates.orgId, orgId)).orderBy(desc(catalogTemplates.updatedAt));
+  const rows = quotaKinds(await db().select().from(catalogTemplates).where(eq(catalogTemplates.orgId, orgId)).orderBy(desc(catalogTemplates.updatedAt)));
   const org = (await db().select({ quota: organizations.templateQuota }).from(organizations).where(eq(organizations.id, orgId)).limit(1))[0];
   const used = rows.filter((r) => r.status !== 'retired').length;
   return { rows, used, quota: org ? org.quota : 0 };
@@ -119,7 +129,11 @@ export async function studio(kind: UploadedTemplateKind, id: string) {
 }
 
 export async function createTemplate(ctx: StudioActor, input: z.infer<typeof NewTemplateInput>) {
-  const orgId = scopeOf(ctx);
+  const shopId = scopeOf(ctx);
+  // The platform may make a template for one customer
+  const forOrg = !shopId && input.forOrgId ? (await db().select({ id: organizations.id }).from(organizations).where(eq(organizations.id, input.forOrgId)).limit(1))[0]?.id : null;
+  if (!shopId && input.forOrgId && !forOrg) throw new AppError('ไม่พบร้านที่เลือก');
+  const orgId = shopId;
   if (orgId) {
     if (!(SHOP_TEMPLATE_KINDS as readonly string[]).includes(input.kind)) throw new AppError('ร้านอัปโหลดได้เฉพาะกรอบภาพ 4x6 และกรอบเข็มกลัด');
     const { used, quota } = await shopTemplates(orgId);
@@ -129,6 +143,7 @@ export async function createTemplate(ctx: StudioActor, input: z.infer<typeof New
   }
   // A customer's ids never collide with the platform's or another customer's
   const id = orgId ? `tpl_s${randomCode('abcdefghijklmnopqrstuvwxyz0123456789', 10)}` : `tpl_${input.slug}`;
+  const owner = orgId ?? forOrg ?? null;
   if (!UPLOADED_ID_PATTERN.test(id)) throw new AppError('รหัสไม่ถูกต้อง');
   if (BUILTIN_CATALOG.some((c) => c.id === id)) throw new AppError('รหัสนี้ถูกใช้แล้ว');
   try {
@@ -138,7 +153,7 @@ export async function createTemplate(ctx: StudioActor, input: z.infer<typeof New
         id,
         source: 'uploaded',
         status: 'draft',
-        orgId,
+        orgId: owner,
         name: input.name,
         description: input.description || null,
         tags: input.tags,
@@ -152,7 +167,7 @@ export async function createTemplate(ctx: StudioActor, input: z.infer<typeof New
     if (isDuplicateKey(err)) throw new AppError('รหัสนี้ถูกใช้แล้วในหมวดนี้');
     throw err;
   }
-  await audit(auditActor(ctx), { action: 'template.create', resourceType: 'template', resourceId: `${input.kind}:${id}`, after: { name: input.name } });
+  await audit(auditActor(ctx), { action: 'template.create', resourceType: 'template', resourceId: `${input.kind}:${id}`, after: { name: input.name, ...(forOrg ? { forOrgId: forOrg } : {}) } });
   return id;
 }
 
@@ -243,11 +258,13 @@ export async function removeDraftFile(ctx: StudioActor, kind: UploadedTemplateKi
 }
 
 /** What still blocks publishing the draft. */
-export function publishIssues(kind: UploadedTemplateKind, v: Pick<TemplateVersion, 'spec' | 'files'>): string[] {
+export function publishIssues(kind: UploadedTemplateKind, v: Pick<TemplateVersion, 'spec' | 'files'>, opts: { uploaded?: boolean } = {}): string[] {
   if (kind === 'ai-scene') {
     const issues: string[] = [];
     const r = AiSceneSpecSchema.safeParse(v.spec);
     if (!r.success) issues.push(r.error.issues[0]?.message ?? 'คำอธิบายฉากไม่ครบ');
+    // Uploaded scenes are drawn from their brief (built-in ones keep theirs in code)
+    else if (opts.uploaded && !r.data.brief) issues.push('ยังไม่ได้กรอกบรีฟสำหรับ AI (แนวภาพ ฉาก แสง ชุด ทรงผม)');
     if (!v.files.plate) issues.push('ยังไม่ได้อัปโหลดภาพฉากต้นแบบ');
     if (!v.files.female && !v.files.male) issues.push('ต้องมีภาพตัวอย่างอย่างน้อย 1 ภาพ (ผู้หญิงหรือผู้ชาย)');
     return issues;
@@ -264,7 +281,7 @@ export async function publishDraft(ctx: StudioActor, kind: UploadedTemplateKind,
   await ownedRow(ctx, kind, id);
   const s = await studio(kind, id);
   if (!s.draft) throw new AppError('ไม่มีร่างที่รอเผยแพร่');
-  const issues = publishIssues(kind, s.draft);
+  const issues = publishIssues(kind, s.draft, { uploaded: s.template.source === 'uploaded' });
   if (issues.length) throw new AppError(`ยังเผยแพร่ไม่ได้: ${issues.join(' • ')}`);
   return goLive(ctx, s.template.status, s.template.orgId, kind, id, s.draft.version, s.draft.id, 'template.version_publish');
 }

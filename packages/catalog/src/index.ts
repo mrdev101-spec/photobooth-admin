@@ -84,7 +84,8 @@ export type ClassicTemplateId = (typeof CLASSIC_TEMPLATES)[number]['id'];
 export const AI_SCENE_CATEGORIES = [
   { id: 'movie', name: 'ภาพยนตร์' },
   { id: 'festival', name: 'เทศกาล' },
-  { id: 'thailand', name: 'ท่องเที่ยวไทย' }
+  { id: 'thailand', name: 'ท่องเที่ยวไทย' },
+  { id: 'special', name: 'งานพิเศษ' }
 ] as const;
 
 /** AI scenes are platform-managed only (customers can switch them on/off, not edit them). Same ids as the kiosk (aiTemplateData.js). */

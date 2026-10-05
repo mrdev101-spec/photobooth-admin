@@ -201,7 +201,7 @@ const imageDataUrl = z
 /** POST /kiosk/ai/jobs — one customer image. A retry with the same requestId gets the same job. */
 export const AiJobRequestSchema = z.object({
   requestId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/),
-  sceneId: z.string().regex(/^[a-z0-9-]{1,40}$/),
+  sceneId: z.string().regex(/^([a-z0-9-]{1,40}|tpl_[a-z0-9][a-z0-9_-]{1,58})$/),
   photo: imageDataUrl,
   faceCrop: imageDataUrl.optional(),
   /** The paid payment (Admin id) this image uses; omitted when the kiosk does not charge (free / simulated). */

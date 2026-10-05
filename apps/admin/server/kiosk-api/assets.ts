@@ -1,7 +1,7 @@
 import 'server-only';
 import { and, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm';
 import { AI_SCENES } from '@photobooth/catalog';
-import type { AssetManifestResponse, AssetRef, ManifestTemplate, TemplateFiles } from '@photobooth/contracts';
+import { AiSceneSpecSchema, publicAiSpec, type AiSceneSpec, type AssetManifestResponse, type AssetRef, type FrameSpec, type ManifestTemplate, type TemplateFiles } from '@photobooth/contracts';
 import { db } from '@/server/db/client';
 import { catalogTemplates, kiosks, templateVersions } from '@/server/db/schema';
 import { assetUrl } from '@/server/services/asset-store';
@@ -32,6 +32,8 @@ export async function assetManifest(auth: KioskAuth, since: number | null, origi
   for (const t of live) {
     const v = versions.find((x) => x.kind === t.kind && x.templateId === t.id && x.version === t.publishedVersion);
     if (!v) continue;
+    // An uploaded AI scene is drawn from its brief: without one the Admin could not make it
+    if (t.kind === 'ai-scene' && t.source === 'uploaded' && !AiSceneSpecSchema.safeParse(v.spec).data?.brief) continue;
     const files: TemplateFiles = {};
     for (const [k, ref] of Object.entries(v.files) as [keyof TemplateFiles, AssetRef | undefined][]) {
       if (ref) files[k] = { ...ref, url: assetUrl(ref.url, origin) };
@@ -45,7 +47,8 @@ export async function assetManifest(auth: KioskAuth, since: number | null, origi
       desc: t.description ?? builtin?.desc ?? '',
       tags: t.tags ?? (builtin ? [builtin.category] : []),
       files,
-      spec: v.spec
+      // AI scenes: menu facts only (the brief stays on the Admin)
+      spec: t.kind === 'ai-scene' ? publicAiSpec(v.spec as Partial<AiSceneSpec>) : (v.spec as FrameSpec)
     });
   }
   return { revision, generatedAt: new Date().toISOString(), templates };

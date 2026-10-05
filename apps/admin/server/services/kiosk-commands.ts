@@ -1,7 +1,7 @@
 import 'server-only';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@/server/db/client';
-import { kioskCommands, kiosks, orders, printJobs } from '@/server/db/schema';
+import { kioskCommands, kiosks, orders, printJobs, orderFiles } from '@/server/db/schema';
 import { assertCan, type OrgContext } from '@/server/auth/context';
 import { audit } from '@/server/audit';
 import { AppError, notFound } from '@/server/lib/errors';
@@ -28,7 +28,15 @@ export async function sendOrderCommand(ctx: OrgContext, orderId: string, type: '
     .limit(MAX_OPEN);
   if (open.length >= MAX_OPEN) throw new AppError('ตู้มีคำสั่งค้างมากเกินไป รอสักครู่');
   const id = newId('cmd');
-  await db().insert(kioskCommands).values({ id, orgId: ctx.org.id, kioskRowId: kiosk.id, type, payload: { clientOrderId: order.clientOrderId, orderId: order.id }, createdBy: ctx.user.id });
+  const payload: Record<string, unknown> = { clientOrderId: order.clientOrderId, orderId: order.id };
+  if (type === 'reprint') {
+    // Printed again from the originals in R2 when the kiosk's own copy of the sheets is gone
+    const files = await db().select({ kind: orderFiles.kind, key: orderFiles.r2Key, url: orderFiles.url }).from(orderFiles).where(eq(orderFiles.orderId, order.id));
+    payload.files = files.filter((f) => f.key && (f.kind === 'photo' || f.kind === 'badge'));
+    if (order.badge) payload.badge = { size: order.badge.size, copies: order.badge.copies };
+    if (order.queueNo) payload.queueNo = order.queueNo;
+  }
+  await db().insert(kioskCommands).values({ id, orgId: ctx.org.id, kioskRowId: kiosk.id, type, payload, createdBy: ctx.user.id });
   await audit({ user: ctx.user, orgId: ctx.org.id, actingAsPlatform: ctx.actingAsPlatform }, { action: `order.${type}`, resourceType: 'order', resourceId: order.id, after: { command: id } });
   return { id, label: LABEL[type] };
 }

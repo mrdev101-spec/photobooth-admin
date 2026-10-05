@@ -177,3 +177,34 @@
     cursor: pointer;
   }
 }
+
+/*
+ * Event Studio (the shop's on-site console): the same components on a light theme with its own
+ * accent (indigo-violet instead of the Admin's orange), so staff always see which mode they are in.
+ */
+.studio-theme {
+  --color-primary-50: #f4f3ff;
+  --color-primary-100: #e9e7fe;
+  --color-primary-200: #d4d0fc;
+  --color-primary-300: #b3abf8;
+  --color-primary-400: #8f80f2;
+  --color-primary-500: #6d5ae8;
+  --color-primary-600: #5338d1;
+  --color-primary-700: #452cae;
+  --color-primary-800: #39268c;
+  --color-primary-900: #302370;
+  --color-canvas: #f6f6fb;
+  --primary: #5338d1;
+  --secondary: #f4f3ff;
+  --secondary-foreground: #39268c;
+  --accent: #e9e7fe;
+  --accent-foreground: #302370;
+  --ring: #6d5ae8;
+  --chart-1: #6d5ae8;
+  --chart-2: #5338d1;
+  --chart-3: #b3abf8;
+  --sidebar-primary: #5338d1;
+  --sidebar-accent: #f4f3ff;
+  --sidebar-accent-foreground: #39268c;
+  --sidebar-ring: #6d5ae8;
+}

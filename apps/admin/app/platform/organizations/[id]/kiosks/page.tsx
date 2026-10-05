@@ -12,7 +12,7 @@ import { Badge, Card, EmptyState, Input, Notice, Select, Table, Td, Th, buttonCl
 import { connectionOf, kioskIssues } from '@/lib/kiosk-status';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import { formatQuota, isFull } from '@/lib/quota';
-import { PairingPanel } from '@/app/o/[orgSlug]/kiosks/[id]/pairing-panel';
+import { PairingPanel } from '@/app/o/[orgSlug]/(admin)/kiosks/[id]/pairing-panel';
 import { addFromStockAction, disableKioskAction, enableKioskAction, registerKioskAction, returnToStockAction, unpairKioskPlatformAction } from '../actions';
 import { listStockKiosks } from '@/server/services/kiosk-stock';
 

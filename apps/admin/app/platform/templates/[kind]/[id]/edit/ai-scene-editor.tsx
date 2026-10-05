@@ -4,7 +4,8 @@ import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 import clsx from 'clsx';
 import { ImagePlus, Rocket, Save, Undo2 } from 'lucide-react';
-import type { AiSceneSpec } from '@photobooth/contracts';
+import type { AiSceneBrief, AiSceneSpec } from '@photobooth/contracts';
+import { AI_SCENE_CATEGORIES } from '@photobooth/catalog';
 import { Button, buttonClass } from '@/components/ui';
 import { discardDraftAction, publishDraftAction, removeFileAction, saveDraftAction, uploadFileAction } from '../../../studio-actions';
 import type { EditorFile } from './frame-editor';
@@ -15,14 +16,56 @@ const IMAGES = [
   { slot: 'male', label: 'ตัวอย่างผู้ชาย', help: 'แสดงให้ลูกค้าเลือกที่ตู้' }
 ] as const;
 
+const EMPTY_BRIEF: AiSceneBrief = {
+  style: 'poster',
+  thaiText: false,
+  genre: '',
+  title: '',
+  titleStyle: '',
+  titlePos: '',
+  tagline: '',
+  taglinePos: '',
+  setting: '',
+  lighting: '',
+  female: '',
+  male: '',
+  hairFemale: '',
+  hairMale: '',
+  pose: '',
+  framing: '',
+  camera: ''
+};
+
+// The brief's fields, in English for the AI (Thai only for a Thai title)
+const BRIEF_FIELDS: { key: Exclude<keyof AiSceneBrief, 'style' | 'thaiText'>; label: string; hint: string; rows?: number; required?: boolean }[] = [
+  { key: 'genre', label: 'แนวภาพ', hint: 'เช่น bold high-fashion magazine cover', required: true },
+  { key: 'setting', label: 'ฉากและสถานที่', hint: 'เช่น a minimalist studio with a gold gradient backdrop', rows: 2, required: true },
+  { key: 'lighting', label: 'แสง', hint: 'เช่น dramatic beauty dish key light, warm gold rim light', required: true },
+  { key: 'title', label: 'ชื่อบนภาพ', hint: 'คำที่อยู่บนโปสเตอร์ (ภาษาไทยได้ ติ๊ก "ชื่อเป็นภาษาไทย")' },
+  { key: 'titleStyle', label: 'ลักษณะตัวอักษรชื่อ', hint: 'เช่น huge elegant serif masthead' },
+  { key: 'titlePos', label: 'ตำแหน่งชื่อ', hint: 'เช่น across the top' },
+  { key: 'tagline', label: 'คำโปรย', hint: 'ไม่บังคับ' },
+  { key: 'taglinePos', label: 'ตำแหน่งคำโปรย', hint: 'เช่น bottom left' },
+  { key: 'female', label: 'ชุดผู้หญิง', hint: 'เช่น a black satin blazer dress with gold jewellery', required: true },
+  { key: 'male', label: 'ชุดผู้ชาย', hint: 'เช่น a black tuxedo with an open collar', required: true },
+  { key: 'hairFemale', label: 'ทรงผมผู้หญิง', hint: 'เช่น sleek glossy waves swept to one side', required: true },
+  { key: 'hairMale', label: 'ทรงผมผู้ชาย', hint: 'เช่น a short textured quiff', required: true },
+  { key: 'pose', label: 'ท่าโพส', hint: 'ไม่บังคับ' },
+  { key: 'framing', label: 'การจัดเฟรม', hint: 'ไม่บังคับ เช่น framed from the waist up' },
+  { key: 'camera', label: 'กล้อง/เลนส์', hint: 'ไม่บังคับ เช่น 85mm portrait lens, shallow depth of field' }
+];
+
 export function AiSceneEditor({
   id,
   initialSpec,
   files,
   draftVersion,
   hasPublished,
-  issues
+  issues,
+  uploaded = true
 }: {
+  /** Uploaded scenes carry their own brief (built-in ones keep theirs in code). */
+  uploaded?: boolean;
   id: string;
   initialSpec: AiSceneSpec;
   files: Partial<Record<'plate' | 'female' | 'male', EditorFile>>;
@@ -31,7 +74,9 @@ export function AiSceneEditor({
   issues: string[];
 }) {
   const router = useRouter();
-  const [spec, setSpec] = useState<AiSceneSpec>(initialSpec);
+  const [spec, setSpec] = useState<AiSceneSpec>({ ...initialSpec, category: initialSpec.category ?? 'special', subName: initialSpec.subName ?? '' });
+  const brief = spec.brief ?? EMPTY_BRIEF;
+  const setBrief = (patch: Partial<AiSceneBrief>) => setSpec({ ...spec, brief: { ...brief, ...patch } });
   const [note, setNote] = useState('');
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
@@ -98,15 +143,23 @@ export function AiSceneEditor({
 
       <div className="flex flex-col gap-4">
         <section className="rounded-card border border-ink-200 bg-surface p-4 shadow-card">
-          <h3 className="mb-3 font-semibold text-ink-900">คำอธิบายฉากสำหรับ AI</h3>
-          <textarea
-            value={spec.prompt}
-            onChange={(e) => setSpec({ ...spec, prompt: e.target.value })}
-            rows={9}
-            maxLength={4000}
-            placeholder="เช่น A cinematic movie poster of the person standing on a rainy neon-lit street at night..."
-            className="w-full rounded-lg border border-ink-200 p-3 text-sm"
-          />
+          <h3 className="mb-3 font-semibold text-ink-900">ที่ตู้</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1 text-sm text-ink-700">
+              หมวดในเมนู
+              <select value={spec.category} onChange={(e) => setSpec({ ...spec, category: e.target.value })} className="h-10 rounded-lg border border-ink-200 px-2">
+                {AI_SCENE_CATEGORIES.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm text-ink-700">
+              บรรทัดรอง (ไม่บังคับ)
+              <input value={spec.subName} maxLength={80} onChange={(e) => setSpec({ ...spec, subName: e.target.value })} placeholder="เช่น ชื่อภาษาไทย" className="h-10 rounded-lg border border-ink-200 px-2" />
+            </label>
+          </div>
           <div className="mt-3 grid grid-cols-2 gap-3">
             <label className="flex flex-col gap-1 text-sm text-ink-700">
               เพศของฉากต้นแบบ
@@ -121,6 +174,54 @@ export function AiSceneEditor({
               <input type="color" value={spec.accent} onChange={(e) => setSpec({ ...spec, accent: e.target.value.toUpperCase() })} className="h-10 w-full rounded-lg border border-ink-200" />
             </label>
           </div>
+        </section>
+        {uploaded ? (
+          <section className="rounded-card border border-ink-200 bg-surface p-4 shadow-card">
+            <h3 className="font-semibold text-ink-900">บรีฟสำหรับ AI</h3>
+            <p className="mb-3 text-xs text-ink-500">AI ใช้บรีฟนี้วาดลูกค้าลงในฉาก (เขียนเป็นภาษาอังกฤษ ยกเว้นชื่อภาษาไทย) • ช่องที่มี * ต้องกรอก</p>
+            <div className="mb-3 flex flex-wrap gap-4 text-sm text-ink-700">
+              <label className="flex items-center gap-2">
+                รูปแบบ
+                <select value={brief.style} onChange={(e) => setBrief({ style: e.target.value as AiSceneBrief['style'] })} className="h-9 rounded-lg border border-ink-200 px-2">
+                  <option value="poster">โปสเตอร์ (คนอยู่กลางภาพ)</option>
+                  <option value="postcard">โปสการ์ดท่องเที่ยว (เห็นสถานที่ด้านหลัง)</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={brief.thaiText} onChange={(e) => setBrief({ thaiText: e.target.checked })} className="size-4 accent-primary-600" />
+                ชื่อเป็นภาษาไทย
+              </label>
+            </div>
+            <div className="flex flex-col gap-3">
+              {BRIEF_FIELDS.map((f) => (
+                <label key={f.key} className="flex flex-col gap-1 text-sm text-ink-700">
+                  <span>
+                    {f.label}
+                    {f.required ? <span className="text-danger-600"> *</span> : null}
+                  </span>
+                  <textarea
+                    value={brief[f.key]}
+                    onChange={(e) => setBrief({ [f.key]: e.target.value })}
+                    rows={f.rows ?? 1}
+                    maxLength={600}
+                    placeholder={f.hint}
+                    className="w-full resize-y rounded-lg border border-ink-200 px-3 py-2 text-sm"
+                  />
+                </label>
+              ))}
+            </div>
+          </section>
+        ) : null}
+        <section className="rounded-card border border-ink-200 bg-surface p-4 shadow-card">
+          <h3 className="mb-2 font-semibold text-ink-900">บันทึก / โจทย์ของฉาก</h3>
+          <textarea
+            value={spec.prompt}
+            onChange={(e) => setSpec({ ...spec, prompt: e.target.value })}
+            rows={4}
+            maxLength={4000}
+            placeholder="ไม่บังคับ เช่น โจทย์จากลูกค้า หรือข้อควรระวัง"
+            className="w-full rounded-lg border border-ink-200 p-3 text-sm"
+          />
         </section>
         {issues.length ? (
           <section className="rounded-card border border-warning-200 bg-warning-50 p-4 text-sm text-warning-800">

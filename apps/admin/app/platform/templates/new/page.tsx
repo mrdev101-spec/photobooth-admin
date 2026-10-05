@@ -6,12 +6,14 @@ import { ActionForm, FormField, SubmitButton } from '@/components/form';
 import { Card, Input, Notice, PageHeader, Select } from '@/components/ui';
 import { TEMPLATE_KINDS } from '@/lib/template-visibility';
 import { createTemplateAction } from '../studio-actions';
+import { listOrganizations } from '@/server/services/organizations';
 
 export const metadata: Metadata = { title: 'เพิ่ม Template' };
 
 export default async function NewTemplatePage({ searchParams }: { searchParams: Promise<{ kind?: string }> }) {
   await requirePlatform('platform.catalog');
   const { kind } = await searchParams;
+  const orgs = await listOrganizations();
   return (
     <>
       <PageHeader
@@ -44,10 +46,20 @@ export default async function NewTemplatePage({ searchParams }: { searchParams: 
           <FormField label="คำอธิบาย" name="description">
             <Input name="description" maxLength={300} placeholder="สั้นๆ ให้ลูกค้าเข้าใจว่าแบบนี้เป็นอย่างไร" />
           </FormField>
+          <FormField label="ทำให้ร้าน" name="forOrgId" hint="ทุกร้าน = template สาธารณะ • เลือกร้าน = ขึ้นเฉพาะตู้ของร้านนั้น ร้านอื่นไม่เห็น (เช่น ฉากที่มีโลโก้ของลูกค้า) และไม่นับในโควตา template ของร้าน">
+            <Select name="forOrgId" defaultValue="">
+              <option value="">ทุกร้าน (สาธารณะ)</option>
+              {orgs.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </Select>
+          </FormField>
           <FormField label="แท็ก (คั่นด้วย ,)" name="tags">
             <Input name="tags" placeholder="festival, colorful" />
           </FormField>
-          <Notice tone="info">ไฟล์ที่ต้องเตรียม: กรอบ 4x6 = PNG 1200x1800 • เข็มกลัด = PNG 1000x1000 • Classic = PNG กว้าง 576 หรือ 384 • ฉาก AI = ภาพฉากต้นแบบ + ตัวอย่างหญิง/ชาย</Notice>
+          <Notice tone="info">ไฟล์ที่ต้องเตรียม: กรอบ 4x6 = PNG 1200x1800 • เข็มกลัด = PNG 1000x1000 • Classic = PNG กว้าง 576 หรือ 384 • ฉาก AI = ภาพฉากต้นแบบ + ตัวอย่างหญิง/ชาย + บรีฟสำหรับ AI</Notice>
           <div>
             <SubmitButton pendingLabel="กำลังสร้าง…">สร้างและไปหน้าแก้ไข</SubmitButton>
           </div>

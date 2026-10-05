@@ -6,7 +6,7 @@ import { catalogState, catalogTemplates, kioskConfigRevisions, kiosks, organizat
 import { assertCan, type OrgContext, type PlatformContext } from '@/server/auth/context';
 import { audit } from '@/server/audit';
 import { AppError } from '@/server/lib/errors';
-import { BUILTIN_CATALOG, TEMPLATE_KINDS, catalogItems, visibleIds, withVisible, type CatalogItem, type CatalogState, type RetiredSet, type TemplateKind } from '@/lib/template-visibility';
+import { BUILTIN_CATALOG, TEMPLATE_KINDS, catalogItems, visibleIds, withArt, withVisible, type CatalogItem, type CatalogState, type RetiredSet, type TemplateKind } from '@/lib/template-visibility';
 import { assetPath } from './asset-store';
 import { bumpAllKiosks, currentSettings, saveKioskConfig } from './kiosk-config';
 import { listKiosks } from './kiosks';
@@ -57,11 +57,38 @@ export async function getCatalogState(orgId?: string): Promise<CatalogState> {
   const retired: RetiredSet = {};
   for (const r of rows) if (r.source === 'builtin' && r.status === 'retired') (retired[r.kind] ??= new Set()).add(r.id);
   const live = rows.filter((r) => r.source === 'uploaded' && r.status === 'published' && r.publishedVersion);
-  const versions = await versionsOf(live, 'published');
+  const withFiles = rows.filter((r) => r.source === 'builtin' && r.publishedVersion);
+  const versions = await versionsOf([...live, ...withFiles], 'published');
   return {
     retired,
-    uploaded: live.map((t) => uploadedItem(t, versions.get(`${t.kind}:${t.id}`) ?? null)).sort((a, b) => a.name.localeCompare(b.name, 'th'))
+    uploaded: live.map((t) => uploadedItem(t, versions.get(`${t.kind}:${t.id}`) ?? null)).sort((a, b) => a.name.localeCompare(b.name, 'th')),
+    builtinArt: builtinArt(withFiles, versions)
   };
+}
+
+/** Preview images of built-in templates that have published files (the AI Studio scenes). */
+function builtinArt(rows: CatalogTemplate[], versions: Map<string, TemplateVersion>): NonNullable<CatalogState['builtinArt']> {
+  const out: NonNullable<CatalogState['builtinArt']> = {};
+  for (const t of rows) {
+    const v = versions.get(`${t.kind}:${t.id}`);
+    if (!v) continue;
+    const src = (k: keyof TemplateFiles) => (v.files[k] ? assetPath(v.files[k]!.url) : undefined);
+    const gallery = [
+      src('plate') && { src: src('plate')!, label: 'ฉากต้นแบบ' },
+      src('female') && { src: src('female')!, label: 'ตัวอย่าง (ผู้หญิง)' },
+      src('male') && { src: src('male')!, label: 'ตัวอย่าง (ผู้ชาย)' }
+    ].filter((g): g is { src: string; label: string } => !!g);
+    if (!gallery.length) continue;
+    out[`${t.kind}:${t.id}`] = {
+      image: src('female') ?? src('male') ?? src('plate'),
+      gallery,
+      facts: [
+        { label: 'ภาพตัวอย่าง', value: 'จากคลังของ Admin (ตู้ดาวน์โหลดไปใช้)' },
+        { label: 'เวอร์ชัน', value: String(v.version) }
+      ]
+    };
+  }
+  return out;
 }
 
 /** The published version of each template, or (`latest`) the published one else the newest. */
@@ -124,7 +151,7 @@ export async function platformCatalog(): Promise<{ kiosksTotal: number; items: P
   return {
     kiosksTotal: rows.length,
     items: [
-      ...BUILTIN_CATALOG.map((c) => ({ ...c, source: 'builtin' as const, status: state.retired[c.kind]?.has(c.id) ? ('retired' as const) : ('published' as const), kiosks: usage.get(`${c.kind}:${c.id}`) ?? 0 })),
+      ...BUILTIN_CATALOG.map((c) => ({ ...withArt(c, state), source: 'builtin' as const, status: state.retired[c.kind]?.has(c.id) ? ('retired' as const) : ('published' as const), kiosks: usage.get(`${c.kind}:${c.id}`) ?? 0 })),
       ...uploaded
     ]
   };
@@ -138,9 +165,9 @@ export async function templateDetail(kind: TemplateKind, id: string) {
   const versions = builtin ? [] : await db().select().from(templateVersions).where(and(eq(templateVersions.kind, kind), eq(templateVersions.templateId, id))).orderBy(asc(templateVersions.version));
   const status: Status = row?.status ?? 'published';
   const shownVersion = builtin ? null : (versions.find((v) => v.version === row!.publishedVersion) ?? versions.at(-1) ?? null);
-  const item: CatalogItem = builtin ?? uploadedItem(row!, shownVersion);
   // Count as if the template were live, so the platform sees who retiring affects
   const state = await getCatalogState();
+  const item: CatalogItem = builtin ? withArt(builtin, state) : uploadedItem(row!, shownVersion);
   const asLive: CatalogState = builtin
     ? { ...state, retired: { ...state.retired, [kind]: new Set([...(state.retired[kind] ?? [])].filter((x) => x !== id)) } }
     : { ...state, uploaded: [...state.uploaded.filter((u) => u.id !== id), item] };

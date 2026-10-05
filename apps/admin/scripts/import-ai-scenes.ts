@@ -57,7 +57,7 @@ async function main() {
     const version = (latest?.version ?? 0) + 1;
     const now = new Date();
     // The generation prompt stays in the kiosk (aiStudio.cjs) until AI calls move to the Admin
-    const spec: AiSceneSpec = { prompt: `Built-in scene "${scene.name}": the generation prompt is kept by the kiosk for now.`, baseGender: 'any', accent: '#C8102E' };
+    const spec: AiSceneSpec = { prompt: `Built-in scene "${scene.name}": the generation prompt is kept by the kiosk for now.`, baseGender: 'any', accent: '#C8102E', category: scene.category, subName: '' };
     await db().insert(templateVersions).values({ id: newId('tpv'), kind: 'ai-scene', templateId: scene.id, version, spec, files, note: 'นำเข้าภาพฉากในตัวจากตู้', createdBy: admin.id, publishedAt: now });
     await db()
       .insert(catalogTemplates)

@@ -1,4 +1,5 @@
 import 'server-only';
+import type { AiSceneSpec } from '@photobooth/contracts';
 
 /**
  * Generation briefs of the built-in AI Studio scenes (moved from the kiosk's aiStudio.cjs).
@@ -26,6 +27,34 @@ export interface ScenePrompt {
   pose?: string;
   framing?: string;
   camera?: string;
+}
+
+/** An uploaded scene's brief (template spec) as the generation input; null without a brief. */
+export function sceneFromSpec(spec: AiSceneSpec): ScenePrompt | null {
+  const b = spec.brief;
+  if (!b) return null;
+  const opt = (v: string) => (v.trim() ? v.trim() : undefined);
+  return {
+    baseGender: spec.baseGender === 'male' ? 'male' : 'female',
+    category: spec.category,
+    style: b.style === 'postcard' ? 'postcard' : undefined,
+    thaiText: b.thaiText && !!b.title.trim() ? true : undefined,
+    genre: b.genre,
+    title: b.title,
+    titleStyle: b.titleStyle || 'huge bold',
+    titlePos: b.titlePos || 'across the top',
+    tagline: opt(b.tagline),
+    taglinePos: opt(b.taglinePos),
+    setting: b.setting,
+    lighting: b.lighting,
+    female: b.female,
+    male: b.male,
+    hairFemale: b.hairFemale,
+    hairMale: b.hairMale,
+    pose: opt(b.pose),
+    framing: opt(b.framing),
+    camera: opt(b.camera)
+  };
 }
 
 export const SCENE_PROMPTS: Record<string, ScenePrompt> = {

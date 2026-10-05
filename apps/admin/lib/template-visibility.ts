@@ -100,16 +100,27 @@ export type RetiredSet = Partial<Record<TemplateKind, Set<string>>>;
 export interface CatalogState {
   retired: RetiredSet;
   uploaded: CatalogItem[];
+  /**
+   * Images published in the Admin for built-in templates (the AI Studio scenes imported from
+   * the kiosk), by `kind:id`; they replace the static previews.
+   */
+  builtinArt?: Record<string, Pick<CatalogItem, 'image' | 'gallery' | 'facts'>>;
 }
 
 export const BUILTIN_ONLY: CatalogState = { retired: {}, uploaded: [] };
+
+/** A built-in item with the images published for it in the Admin, when there are any. */
+export function withArt(item: CatalogItem, state: CatalogState = BUILTIN_ONLY): CatalogItem {
+  const art = state.builtinArt?.[`${item.kind}:${item.id}`];
+  return art ? { ...item, ...art } : item;
+}
 
 const listOf = (s: KioskSettings['templates'], kind: TemplateKind): string[] =>
   kind === 'photo-4x6' ? s.photoLayouts : kind === 'badge' ? s.badgeFrames : kind === 'classic' ? s.classic : s.aiScenes;
 
 /** Every template a kiosk could show for a kind: built-ins not retired, then uploaded ones. */
 export function catalogItems(kind: TemplateKind, state: CatalogState = BUILTIN_ONLY): CatalogItem[] {
-  return [...BUILTIN_CATALOG.filter((c) => c.kind === kind && !state.retired[kind]?.has(c.id)), ...state.uploaded.filter((c) => c.kind === kind)];
+  return [...BUILTIN_CATALOG.filter((c) => c.kind === kind && !state.retired[kind]?.has(c.id)).map((c) => withArt(c, state)), ...state.uploaded.filter((c) => c.kind === kind)];
 }
 
 export function publishedIds(kind: TemplateKind, state: CatalogState = BUILTIN_ONLY): string[] {

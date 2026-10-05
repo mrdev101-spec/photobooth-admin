@@ -8,7 +8,8 @@ import { readAsset } from '@/server/services/asset-store';
 import { engineForScene } from '@/server/services/ai-settings';
 import { AiEngineError, generateImage, type AiImage } from '@/server/ai/engine';
 import { portraitPrompt, refinePrompt } from '@/server/ai/prompts';
-import { SCENE_PROMPTS } from '@/server/ai/scene-prompts';
+import { SCENE_PROMPTS, sceneFromSpec, type ScenePrompt } from '@/server/ai/scene-prompts';
+import { AiSceneSpecSchema, isUploadedTemplateId } from '@photobooth/contracts';
 import { currentMonth } from '@/lib/ai-quota';
 import { PaymentFlowError, claimPayment, releasePayment } from '@/server/services/payments';
 
@@ -68,6 +69,26 @@ export async function aiAvailability(org: Organization): Promise<AiAvailability>
   return { ...usage, available: !reason, reason };
 }
 
+/**
+ * The generation brief of a scene: built-in ids from code, uploaded ones from their published
+ * version (the platform's, or this customer's own). null = unknown / not offered to this customer.
+ */
+async function sceneBrief(sceneId: string, orgId: string): Promise<ScenePrompt | null> {
+  if (SCENE_PROMPTS[sceneId]) return SCENE_PROMPTS[sceneId]!;
+  if (!isUploadedTemplateId(sceneId)) return null;
+  const row = (
+    await db()
+      .select({ spec: templateVersions.spec, orgId: catalogTemplates.orgId })
+      .from(catalogTemplates)
+      .innerJoin(templateVersions, and(eq(templateVersions.kind, catalogTemplates.kind), eq(templateVersions.templateId, catalogTemplates.id), eq(templateVersions.version, catalogTemplates.publishedVersion)))
+      .where(and(eq(catalogTemplates.kind, 'ai-scene'), eq(catalogTemplates.id, sceneId), eq(catalogTemplates.status, 'published')))
+      .limit(1)
+  )[0];
+  if (!row || (row.orgId && row.orgId !== orgId)) return null;
+  const spec = AiSceneSpecSchema.safeParse(row.spec);
+  return spec.success ? sceneFromSpec(spec.data) : null;
+}
+
 /** The scene's plate (poster without people) from its published version, if any. */
 async function scenePlate(sceneId: string): Promise<AiImage | null> {
   const ref = (
@@ -107,7 +128,7 @@ export interface NewJob {
 export async function createAiJob(org: Organization, kioskRowId: string, input: NewJob): Promise<{ job: AiJob; created: boolean }> {
   const existing = await jobByRequest(kioskRowId, input.requestId);
   if (existing) return { job: existing, created: false };
-  if (!SCENE_PROMPTS[input.sceneId]) throw new AiJobError('TP0001', 404, 'ไม่พบฉากนี้');
+  if (!(await sceneBrief(input.sceneId, org.id))) throw new AiJobError('TP0001', 404, 'ไม่พบฉากนี้');
   const availability = await aiAvailability(org);
   if (availability.reason === 'quota') throw new AiJobError('AD0009', 403, `โควตา AI เดือนนี้หมดแล้ว (${availability.used}/${availability.quota} ภาพ)`);
   if (availability.reason === 'not_configured') throw new AiJobError('AD0014', 503, 'ผู้ให้บริการยังไม่ได้ตั้งค่า AI');
@@ -181,7 +202,7 @@ export async function runAiJob(jobId: string, log: (msg: string) => void = conso
   const job = (await jobById(jobId))!;
   const t0 = Date.now();
   try {
-    const scene = SCENE_PROMPTS[job.sceneId];
+    const scene = await sceneBrief(job.sceneId, job.orgId);
     if (!scene) throw new AiJobError('TP0001', 404, 'ไม่พบฉากนี้');
     const choice = await engineForScene(!!scene.thaiText);
     if (!choice) throw new AiJobError('AD0014', 503, 'ผู้ให้บริการยังไม่ได้ตั้งค่า AI');
