@@ -1,4 +1,4 @@
-import { ChartColumn, Eye, Layers, HardDrive, LayoutDashboard, LayoutTemplate, MapPin, MonitorSmartphone, PackageCheck, ReceiptText, ScrollText, Users } from 'lucide-react';
+import { ChartColumn, Eye, Layers, Radio, HardDrive, LayoutDashboard, LayoutTemplate, MapPin, MonitorSmartphone, PackageCheck, ReceiptText, ScrollText, Users, Landmark } from 'lucide-react';
 import { getOrgContext } from '@/server/auth/context';
 import { ORG_ROLE_LABELS, PLATFORM_ROLE_LABELS, can } from '@/server/auth/rbac';
 import { organizationsForUser } from '@/server/services/organizations';
@@ -17,6 +17,7 @@ export default async function OrgLayout({ children, params }: { children: React.
     {
       title: 'หน้างาน',
       items: ([
+        can(p, 'console.view') && { href: `${base}/console`, label: 'Event Console', icon: <Radio aria-hidden /> },
         can(p, 'pickup.use') && { href: `${base}/pickup`, label: 'จุดรับรูป', icon: <PackageCheck aria-hidden /> },
         can(p, 'order.view') && { href: `${base}/orders`, label: 'ออเดอร์', icon: <ReceiptText aria-hidden /> },
         can(p, 'report.view') && { href: `${base}/sales`, label: 'ยอดขาย', icon: <ChartColumn aria-hidden /> }
@@ -36,6 +37,7 @@ export default async function OrgLayout({ children, params }: { children: React.
         can(p, 'branch.view') && { href: `${base}/settings/branches`, label: 'สาขา', icon: <MapPin aria-hidden /> },
         can(p, 'member.view') && { href: `${base}/settings/members`, label: 'สมาชิก', icon: <Users aria-hidden /> },
         can(p, 'kiosk.view') && { href: `${base}/settings/storage`, label: 'พื้นที่เก็บภาพ', icon: <HardDrive aria-hidden /> },
+        can(p, 'payment.view') && { href: `${base}/settings/payments`, label: 'การรับเงิน', icon: <Landmark aria-hidden /> },
         can(p, 'audit.view') && { href: `${base}/settings/audit`, label: 'Audit log', icon: <ScrollText aria-hidden /> }
       ] as (NavItem | false)[]).filter((x): x is NavItem => !!x)
     }

@@ -16,6 +16,7 @@ export default async function PlatformKiosksPage({ searchParams }: { searchParam
   await requirePlatform();
   const { org: orgFilter } = await searchParams;
   const [orgs, rows] = await Promise.all([listOrganizations(), listAllKiosks({ orgId: orgFilter || undefined })]);
+  const stockId = rows.find((r) => r.orgKind === 'stock')?.orgId ?? (orgFilter && !orgs.some((o) => o.id === orgFilter) ? orgFilter : '');
   const selected = orgs.find((o) => o.id === orgFilter);
   const now = Date.now();
 
@@ -24,7 +25,7 @@ export default async function PlatformKiosksPage({ searchParams }: { searchParam
       <AutoRefresh seconds={30} />
       <PageHeader
         title="ตู้ทั้งหมด"
-        description={`${rows.length} ตู้${selected ? ` ของ ${selected.name}` : ' ทุกบัญชีลูกค้า'} • ตั้งค่า เปิด/ปิดการใช้งาน ได้ที่แท็บ “ตู้” ของลูกค้า`}
+        description={`${rows.length} ตู้${selected ? ` ของ ${selected.name}` : ' รวมคลังตู้'} • ออก Key เปิด/ปิดการใช้งาน รีเซ็ตและล็อก ได้ที่แท็บ “ตู้” ของลูกค้า หรือเมนู “คลังตู้”`}
         actions={
           selected ? (
             <Link href={`/platform/organizations/${selected.id}/kiosks`} className={buttonClass()}>
@@ -41,6 +42,7 @@ export default async function PlatformKiosksPage({ searchParams }: { searchParam
         </label>
         <Select id="org" name="org" defaultValue={orgFilter ?? ''} wrapperClassName="w-72" className="h-10">
           <option value="">ทุกบัญชีลูกค้า</option>
+          {stockId ? <option value={stockId}>คลังตู้ (ยังไม่มีร้าน)</option> : null}
           {orgs.map((o) => (
             <option key={o.id} value={o.id}>
               {o.name}
@@ -67,7 +69,7 @@ export default async function PlatformKiosksPage({ searchParams }: { searchParam
             </tr>
           </thead>
           <tbody>
-            {rows.map(({ kiosk: k, orgId, orgName, branchName }) => {
+            {rows.map(({ kiosk: k, orgId, orgName, orgKind, orgStatus, branchName }) => {
               const issues = kioskIssues(k, now).filter((i) => i.level !== 'info');
               return (
                 <tr key={k.id} className="align-top hover:bg-ink-50">
@@ -75,13 +77,28 @@ export default async function PlatformKiosksPage({ searchParams }: { searchParam
                     <Link href={`/platform/organizations/${orgId}/kiosks`} className="font-semibold text-ink-900 hover:underline">
                       {k.name}
                     </Link>
-                    <div className="font-mono text-xs text-ink-500">{k.kioskId ?? 'ยังไม่จับคู่'}</div>
+                    <div className="font-mono text-xs text-ink-500">{k.kioskId ?? k.formerKioskId ?? 'ยังไม่ลงทะเบียน'}</div>
                   </Td>
                   <Td>
-                    <Link href={`/platform/organizations/${orgId}`} className="text-ink-900 hover:underline">
-                      {orgName}
-                    </Link>
-                    <div className="text-xs text-ink-500">{branchName ?? '—'}</div>
+                    {orgKind === 'stock' ? (
+                      <Link href={`/platform/organizations/${orgId}/kiosks`}>
+                        <Badge tone="info" dot>
+                          คลังตู้ (ยังไม่มีร้าน)
+                        </Badge>
+                      </Link>
+                    ) : (
+                      <>
+                        <Link href={`/platform/organizations/${orgId}`} className="text-ink-900 hover:underline">
+                          {orgName}
+                        </Link>
+                        {orgStatus !== 'active' ? (
+                          <Badge tone="danger" dot className="ml-2">
+                            ร้านถูกระงับ
+                          </Badge>
+                        ) : null}
+                        <div className="text-xs text-ink-500">{branchName ?? '—'}</div>
+                      </>
+                    )}
                   </Td>
                   <Td>
                     <ConnectionBadge connection={connectionOf(k, now)} />

@@ -29,7 +29,11 @@ export default async function OrganizationLayout({ children, params }: { childre
         title={
           <span className="flex flex-wrap items-center gap-3">
             {org.name}
-            {org.status === 'active' ? (
+            {org.kind === 'stock' ? (
+              <Badge tone="info" dot>
+                คลังตู้ของแพลตฟอร์ม
+              </Badge>
+            ) : org.status === 'active' ? (
               <Badge tone="success" dot>
                 ใช้งานอยู่
               </Badge>
@@ -42,15 +46,17 @@ export default async function OrganizationLayout({ children, params }: { childre
         }
         description={org.slug}
         actions={
+          org.kind === 'stock' ? null : (
           <Link href={`/o/${org.slug}/dashboard`} className={buttonClass('outline')}>
             <Eye className="size-5" aria-hidden />
             เข้าดูแบบซัพพอร์ต
           </Link>
+          )
         }
       />
       <RouteTabs
         label="ส่วนของบัญชีลูกค้า"
-        tabs={[
+        tabs={org.kind === 'stock' ? [{ href: `${base}/kiosks`, label: 'ตู้ในคลัง', icon: <MonitorSmartphone aria-hidden /> }] : [
           { href: base, label: 'ภาพรวม', icon: <LayoutDashboard aria-hidden />, exact: true },
           { href: `${base}/kiosks`, label: 'ตู้', icon: <MonitorSmartphone aria-hidden /> },
           { href: `${base}/users`, label: 'ผู้ใช้', icon: <Users aria-hidden /> },

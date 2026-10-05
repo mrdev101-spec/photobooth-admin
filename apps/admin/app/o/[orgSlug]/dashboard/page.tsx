@@ -10,6 +10,8 @@ import { branches, memberships } from '@/server/db/schema';
 import { orgWhere } from '@/server/tenancy/scoped';
 import { listKiosks } from '@/server/services/kiosks';
 import { pickupQueue, salesSummary, startOfThaiDay } from '@/server/services/orders';
+import { orgAiUsage } from '@/server/services/ai-jobs';
+import { AiUsageBar, aiUsageLevel } from '@/components/ai-usage';
 import { AutoRefresh } from '@/components/auto-refresh';
 import { Badge, Card, DetailRow, EmptyState, Notice, PageHeader, StatCard, Table, Td, Th } from '@/components/ui';
 import { connectionOf, kioskIssues } from '@/lib/kiosk-status';
@@ -24,13 +26,15 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgS
   const canSales = can(ctx.principal, 'report.view');
   const canPickup = can(ctx.principal, 'pickup.use');
   const todayStart = startOfThaiDay();
-  const [branchCount, memberCount, kioskRows, today, queue] = await Promise.all([
+  const [branchCount, memberCount, kioskRows, today, queue, ai] = await Promise.all([
     db().select({ n: count() }).from(branches).where(orgWhere(ctx, branches.orgId, eq(branches.isActive, true))),
     db().select({ n: count() }).from(memberships).where(orgWhere(ctx, memberships.orgId)),
     canKiosks ? listKiosks(ctx) : Promise.resolve([]),
     canSales ? salesSummary(ctx, todayStart, new Date(todayStart.getTime() + 86_400_000)) : Promise.resolve(null),
-    canPickup ? pickupQueue(ctx) : Promise.resolve(null)
+    canPickup ? pickupQueue(ctx) : Promise.resolve(null),
+    orgAiUsage(ctx.org)
   ]);
+  const aiLevel = aiUsageLevel(ai.used, ai.quota);
   const waiting = queue ? queue.waiting.filter((o) => o.status === 'uploaded').length : 0;
   const base = `/o/${ctx.org.slug}`;
   const now = Date.now();
@@ -54,6 +58,12 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgS
     <>
       {canKiosks ? <AutoRefresh seconds={30} /> : null}
       <PageHeader title="ภาพรวม" description={`สถานะตู้ทั้งหมดของ ${ctx.org.name}`} />
+      {aiLevel !== 'ok' ? (
+        <Notice tone={aiLevel === 'full' ? 'danger' : 'warn'} title={aiLevel === 'full' ? 'ภาพ AI ครบโควตาเดือนนี้แล้ว' : 'ภาพ AI ใกล้ครบโควตาเดือนนี้'}>
+          ใช้ไป {formatNumber(ai.used)} จาก {formatNumber(ai.quota ?? 0)} ภาพ
+          {aiLevel === 'full' ? ' • โหมด AI ของตู้ปิดให้บริการชั่วคราวจนถึงเดือนถัดไป' : ' • ครบแล้วโหมด AI ของตู้จะปิดให้บริการชั่วคราว'} ติดต่อผู้ให้บริการเพื่อเพิ่มโควตา
+        </Notice>
+      ) : null}
       <div className="flex flex-col gap-5">
         {!ctx.org.livePaymentsAllowed ? (
           <Notice tone="warn" title="ยังรับเงินจริงไม่ได้">
@@ -126,7 +136,9 @@ export default async function DashboardPage({ params }: { params: Promise<{ orgS
             <dl className="divide-y divide-ink-100">
               <DetailRow label="สาขาที่ใช้งาน">{formatNumber(branchCount[0]?.n ?? 0)}</DetailRow>
               <DetailRow label="ผู้ใช้ / โควตา">{formatQuota(memberCount[0]?.n ?? 0, ctx.org.userQuota)} คน</DetailRow>
-              <DetailRow label="ภาพ AI ต่อเดือน">{ctx.org.aiMonthlyQuota == null ? 'ไม่จำกัด' : `${formatNumber(ctx.org.aiMonthlyQuota)} ภาพ`}</DetailRow>
+              <DetailRow label="ภาพ AI เดือนนี้">
+                <AiUsageBar used={ai.used} quota={ai.quota} className="w-full" />
+              </DetailRow>
               <DetailRow label="รับเงินจริง">{ctx.org.livePaymentsAllowed ? <Badge tone="success" dot>อนุญาต</Badge> : <Badge dot>ยังไม่อนุญาต</Badge>}</DetailRow>
             </dl>
           </Card>

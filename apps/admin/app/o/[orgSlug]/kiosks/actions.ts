@@ -38,10 +38,10 @@ export async function updateKioskAction(orgSlug: string, id: string, _: ActionSt
 }
 
 /** Called directly from the pairing panel (not a form). */
-export async function createPairCodeAction(orgSlug: string, id: string): Promise<{ code?: string; expiresAt?: string; error?: string }> {
+export async function createPairCodeAction(orgSlug: string, id: string, kind: 'pair' | 'key' = 'pair'): Promise<{ code?: string; expiresAt?: string; error?: string }> {
   try {
     const ctx = await getOrgContext(orgSlug);
-    const { code, expiresAt } = await createPairCode(ctx, id);
+    const { code, expiresAt } = await createPairCode(ctx, id, kind === 'key' ? 'key' : 'pair');
     return { code, expiresAt: expiresAt.toISOString() };
   } catch (err) {
     if (err instanceof AppError) return { error: err.message };

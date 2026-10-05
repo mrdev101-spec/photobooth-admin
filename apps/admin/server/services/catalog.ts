@@ -14,7 +14,7 @@ import { listKiosks } from './kiosks';
 // ─── Catalog state ──────────────────────────────────────────────────────────
 
 /** The catalog card for an uploaded template version. */
-export function uploadedItem(t: Pick<CatalogTemplate, 'kind' | 'id' | 'name' | 'description' | 'tags'>, v: Pick<TemplateVersion, 'version' | 'spec' | 'files'> | null): CatalogItem {
+export function uploadedItem(t: Pick<CatalogTemplate, 'kind' | 'id' | 'name' | 'description' | 'tags'> & { orgId?: string | null }, v: Pick<TemplateVersion, 'version' | 'spec' | 'files'> | null): CatalogItem {
   const files: TemplateFiles = v?.files ?? {};
   const path = (k: keyof TemplateFiles) => (files[k] ? assetPath(files[k]!.url) : undefined);
   const facts: NonNullable<CatalogItem['facts']> = [];
@@ -36,6 +36,7 @@ export function uploadedItem(t: Pick<CatalogTemplate, 'kind' | 'id' | 'name' | '
     path('male') && { src: path('male')!, label: 'ตัวอย่าง (ผู้ชาย)' }
   ].filter((g): g is { src: string; label: string } => !!g);
   return {
+    ...(t.orgId ? { ownerOrgId: t.orgId } : {}),
     kind: t.kind,
     id: t.id,
     name: t.name ?? t.id,
@@ -46,9 +47,13 @@ export function uploadedItem(t: Pick<CatalogTemplate, 'kind' | 'id' | 'name' | '
   };
 }
 
-/** Retired built-ins + published uploaded templates (at their published version). */
-export async function getCatalogState(): Promise<CatalogState> {
-  const rows = await db().select().from(catalogTemplates);
+/**
+ * Retired built-ins + published uploaded templates (at their published version). With `orgId`:
+ * what that customer's kiosks may show (the platform's + its own); without: every template.
+ */
+export async function getCatalogState(orgId?: string): Promise<CatalogState> {
+  const all = await db().select().from(catalogTemplates);
+  const rows = orgId === undefined ? all : all.filter((r) => r.orgId === null || r.orgId === orgId);
   const retired: RetiredSet = {};
   for (const r of rows) if (r.source === 'builtin' && r.status === 'retired') (retired[r.kind] ??= new Set()).add(r.id);
   const live = rows.filter((r) => r.source === 'uploaded' && r.status === 'published' && r.publishedVersion);
@@ -150,10 +155,10 @@ export async function templateDetail(kind: TemplateKind, id: string) {
   };
 }
 
-export async function bumpEveryKiosk(ctx: PlatformContext, note: string): Promise<number> {
+export async function bumpEveryKiosk(userId: string, note: string): Promise<number> {
   const orgs = await db().select({ id: organizations.id }).from(organizations).where(isNull(organizations.deletedAt));
   let bumped = 0;
-  for (const o of orgs) bumped += await bumpAllKiosks(o.id, ctx.user.id, note);
+  for (const o of orgs) bumped += await bumpAllKiosks(o.id, userId, note);
   return bumped;
 }
 
@@ -180,7 +185,7 @@ export async function setTemplateStatus(ctx: PlatformContext, kind: TemplateKind
     await db().update(catalogTemplates).set({ status, updatedBy: ctx.user.id }).where(and(eq(catalogTemplates.kind, kind), eq(catalogTemplates.id, id)));
     await bumpManifest();
   }
-  const bumped = await bumpEveryKiosk(ctx, status === 'retired' ? `ส่วนกลางเลิกใช้ template ${id}` : `ส่วนกลางเปิดใช้ template ${id}`);
+  const bumped = await bumpEveryKiosk(ctx.user.id, status === 'retired' ? `ส่วนกลางเลิกใช้ template ${id}` : `ส่วนกลางเปิดใช้ template ${id}`);
   await audit({ user: ctx.user, orgId: null }, { action: status === 'retired' ? 'template.retire' : 'template.publish', resourceType: 'template', resourceId: `${kind}:${id}`, after: { kiosksUpdated: bumped } });
   return bumped;
 }
@@ -190,7 +195,7 @@ export async function setTemplateStatus(ctx: PlatformContext, kind: TemplateKind
 /** The gallery for one kiosk: every published template and whether this kiosk shows it. */
 export async function kioskGallery(ctx: OrgContext, kioskRowId: string) {
   assertCan(ctx, 'kiosk.view');
-  const state = await getCatalogState();
+  const state = await getCatalogState(ctx.org.id);
   const kiosk = (await listKiosks(ctx)).find((k) => k.kiosk.id === kioskRowId)?.kiosk;
   if (!kiosk) throw new AppError('ไม่พบตู้', 'not_found');
   const current = await currentSettings(kiosk);
@@ -213,7 +218,7 @@ export async function kioskGallery(ctx: OrgContext, kioskRowId: string) {
  */
 export async function saveTemplateVisibility(ctx: OrgContext, kioskRowIds: string[], kind: TemplateKind, ids: string[]) {
   assertCan(ctx, 'config.edit');
-  const state = await getCatalogState();
+  const state = await getCatalogState(ctx.org.id);
   const mine = await listKiosks(ctx);
   const targets = mine.filter((k) => kioskRowIds.includes(k.kiosk.id) && k.kiosk.currentRevision > 0 && k.kiosk.status !== 'revoked');
   if (!targets.length) throw new AppError('ไม่มีตู้ที่บันทึกได้');

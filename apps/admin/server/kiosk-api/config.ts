@@ -39,7 +39,7 @@ export async function kioskConfig(auth: KioskAuth, since: number | null): Promis
     updatedAt: row.createdAt.toISOString(),
     // Retired templates never reach the kiosk, even when the list says "all"; uploaded ones only
     // reach kiosks that download the asset manifest
-    settings: forKiosk(withSettingsDefaults(row.settings), await getCatalogState(), { supportsUploaded: kiosk.manifestRevision != null }),
+    settings: forKiosk(withSettingsDefaults(row.settings), await getCatalogState(auth.org.id), { supportsUploaded: kiosk.manifestRevision != null }),
     secrets: secrets ? sealSecrets(secrets, auth.token) : null,
     assets: { manifestRevision: await manifestRevision() }
   };

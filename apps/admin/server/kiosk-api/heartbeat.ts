@@ -2,7 +2,7 @@ import 'server-only';
 import { eq } from 'drizzle-orm';
 import type { HeartbeatData, HeartbeatResponse } from '@photobooth/contracts';
 import { db } from '@/server/db/client';
-import { kiosks } from '@/server/db/schema';
+import { branches, kiosks } from '@/server/db/schema';
 import { manifestRevision } from '@/server/services/catalog';
 import type { KioskAuth } from './auth';
 
@@ -39,14 +39,23 @@ export async function recordHeartbeat(auth: KioskAuth, data: HeartbeatData, ip: 
     })
     .where(eq(kiosks.id, kiosk.id));
 
+  // One key = one machine: another machine using this kiosk's token is closed until the
+  // platform accepts it (or issues a new key)
+  const otherMachine = mismatch || kiosk.fingerprintMismatch;
+  const branch = kiosk.branchId ? (await db().select({ name: branches.name }).from(branches).where(eq(branches.id, kiosk.branchId)).limit(1))[0] : undefined;
   return {
     serverTime: now.toISOString(),
     latestRevision: kiosk.currentRevision,
     manifestRevision: await manifestRevision(),
     maintenance: kiosk.maintenance,
     suspended: org.status !== 'active',
-    disabled: kiosk.status === 'disabled',
-    disabledMessage: kiosk.status === 'disabled' ? 'ตู้ปิดใช้งานชั่วคราว กรุณาติดต่อผู้ให้บริการ' : null,
+    disabled: kiosk.status === 'disabled' || otherMachine,
+    disabledMessage: otherMachine
+      ? 'เครื่องนี้ไม่ตรงกับเครื่องที่ลงทะเบียนไว้ กรุณาติดต่อผู้ให้บริการ'
+      : kiosk.status === 'disabled'
+        ? 'ตู้ปิดใช้งานชั่วคราว กรุณาติดต่อผู้ให้บริการ'
+        : null,
+    account: { org: org.name, stock: org.kind === 'stock', kiosk: kiosk.name, branch: branch?.name ?? null },
     commands: []
   };
 }

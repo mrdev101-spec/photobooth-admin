@@ -33,7 +33,9 @@ export const LimitsInput = z.object({
   kioskQuota: optionalQuota,
   userQuota: optionalQuota,
   aiMonthlyQuota: optionalQuota,
+  templateQuota: optionalQuota,
   customerCanAddKiosks: z.boolean(),
+  ownStripeAllowed: z.boolean().default(false),
   configPermissions: z.record(z.string(), z.enum(['edit', 'view', 'hidden']))
 });
 
@@ -42,7 +44,28 @@ export const NewOrganizationInput = OrganizationInput.extend({
   ownerName: z.string().trim().min(1, 'กรอกชื่อเจ้าของบัญชี').max(120)
 });
 
-const RESERVED_SLUGS = new Set(['platform', 'login', 'kiosk', 'pickup', 'api', 'admin', 'o', 'webhooks', 'internal']);
+export const STOCK_SLUG = 'platform-stock';
+const RESERVED_SLUGS = new Set(['platform', 'login', 'kiosk', 'pickup', 'api', 'admin', 'o', 'webhooks', 'internal', STOCK_SLUG]);
+
+/**
+ * The platform's kiosk stock (คลังตู้): an internal account holding kiosks that no customer
+ * has yet, so they can pair and be tested like any kiosk. Created on first use.
+ */
+export async function stockOrg(): Promise<Organization> {
+  const find = async () => (await db().select().from(organizations).where(and(eq(organizations.kind, 'stock'), isNull(organizations.deletedAt))).limit(1))[0];
+  const found = await find();
+  if (found) return found;
+  const orgId = newId('org');
+  try {
+    await db().transaction(async (tx) => {
+      await tx.insert(organizations).values({ id: orgId, slug: STOCK_SLUG, name: 'คลังตู้', kind: 'stock', kioskQuota: null, userQuota: 0 });
+      await tx.insert(branches).values({ id: newId('brn'), orgId, name: 'คลัง' });
+    });
+  } catch (err) {
+    if (!isDuplicateKey(err)) throw err; // created by a parallel request
+  }
+  return (await find())!;
+}
 
 export async function listOrganizations() {
   return db()
@@ -60,7 +83,7 @@ export async function listOrganizations() {
     })
     .from(organizations)
     .leftJoin(memberships, eq(memberships.orgId, organizations.id))
-    .where(isNull(organizations.deletedAt))
+    .where(and(isNull(organizations.deletedAt), eq(organizations.kind, 'customer')))
     .groupBy(organizations.id)
     .orderBy(desc(organizations.createdAt));
 }
@@ -137,7 +160,9 @@ export async function updateLimits(ctx: PlatformContext, id: string, input: z.in
     kioskQuota: input.kioskQuota,
     userQuota: input.userQuota,
     aiMonthlyQuota: input.aiMonthlyQuota,
+    templateQuota: input.templateQuota,
     customerCanAddKiosks: input.customerCanAddKiosks,
+    ownStripeAllowed: input.ownStripeAllowed,
     configPermissions
   };
   await db().update(organizations).set(after).where(eq(organizations.id, id));
@@ -149,7 +174,9 @@ export async function updateLimits(ctx: PlatformContext, id: string, input: z.in
       kioskQuota: before.kioskQuota,
       userQuota: before.userQuota,
       aiMonthlyQuota: before.aiMonthlyQuota,
+      templateQuota: before.templateQuota,
       customerCanAddKiosks: before.customerCanAddKiosks,
+      ownStripeAllowed: before.ownStripeAllowed,
       configPermissions: resolvePermissions(before.configPermissions)
     },
     after

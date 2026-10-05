@@ -28,6 +28,8 @@ export interface CatalogItem {
   gallery?: { src: string; label: string }[];
   /** Facts shown on the detail page. */
   facts?: { label: string; value: string }[];
+  /** Uploaded by this customer for its own kiosks (absent = the platform's). */
+  ownerOrgId?: string;
 }
 
 // Generated from the kiosk's data/ai-scenes (rockstar has no sample: the kiosk makes it on demand)

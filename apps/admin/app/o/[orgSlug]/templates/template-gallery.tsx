@@ -107,7 +107,8 @@ export function TemplateGallery({
                   {it.tag ? <span className="text-xs font-medium text-primary-700">{it.tag}</span> : null}
                   {it.uploaded ? (
                     <span className={clsx('text-xs font-medium', supportsUploaded ? 'text-violet-700' : 'text-warning-700')}>
-                      {supportsUploaded ? 'ใหม่จากส่วนกลาง' : 'ใหม่จากส่วนกลาง • ตู้นี้ต้องอัปเดตโปรแกรมก่อนจึงจะแสดง'}
+                      {it.ownerOrgId ? 'template ของร้าน' : 'ใหม่จากส่วนกลาง'}
+                      {supportsUploaded ? '' : ' • ตู้นี้ต้องอัปเดตโปรแกรมก่อนจึงจะแสดง'}
                     </span>
                   ) : null}
                   <span className="line-clamp-2 text-sm text-ink-500">{it.desc}</span>

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { KeyRound, MonitorSmartphone, Plus, Power, PowerOff, Settings2, Unlink } from 'lucide-react';
+import { Archive, KeyRound, MonitorSmartphone, PackagePlus, Plus, Power, PowerOff, Settings2, Unlink } from 'lucide-react';
 import { orgContextForPlatform, requirePlatform } from '@/server/auth/context';
 import { canPlatform } from '@/server/auth/rbac';
 import { kioskQuotaUsage, listKiosks } from '@/server/services/kiosks';
@@ -13,7 +13,8 @@ import { connectionOf, kioskIssues } from '@/lib/kiosk-status';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import { formatQuota, isFull } from '@/lib/quota';
 import { PairingPanel } from '@/app/o/[orgSlug]/kiosks/[id]/pairing-panel';
-import { disableKioskAction, enableKioskAction, registerKioskAction, unpairKioskPlatformAction } from '../actions';
+import { addFromStockAction, disableKioskAction, enableKioskAction, registerKioskAction, returnToStockAction, unpairKioskPlatformAction } from '../actions';
+import { listStockKiosks } from '@/server/services/kiosk-stock';
 
 export const metadata: Metadata = { title: 'ตู้ของลูกค้า' };
 
@@ -23,7 +24,9 @@ export default async function OrganizationKiosksPage({ params, searchParams }: {
   const platform = await requirePlatform();
   const ctx = await orgContextForPlatform(platform, id);
   const canManage = canPlatform(platform.user.platformRole, 'platform.org.manage');
-  const [rows, branches, quota] = await Promise.all([listKiosks(ctx, { includeRevoked: sp.revoked === '1' }), listBranches(ctx), kioskQuotaUsage(ctx)]);
+  const isStock = ctx.org.kind === 'stock';
+  // Locked kiosks (reset, waiting for a key) stay in the list
+  const [rows, branches, quota, stock] = await Promise.all([listKiosks(ctx, { includeRevoked: true }), listBranches(ctx), kioskQuotaUsage(ctx), isStock ? Promise.resolve([]) : listStockKiosks()]);
   const activeBranches = branches.filter((b) => b.isActive);
   const pairing = sp.pair ? rows.find((r) => r.kiosk.id === sp.pair && (r.kiosk.status === 'pending' || r.kiosk.status === 'revoked')) : undefined;
   const base = `/platform/organizations/${id}/kiosks`;
@@ -36,13 +39,52 @@ export default async function OrganizationKiosksPage({ params, searchParams }: {
 
       {pairing ? (
         <div>
-          <p className="mb-2 font-semibold text-ink-900">รหัสจับคู่สำหรับ {pairing.kiosk.name}</p>
-          <PairingPanel orgSlug={ctx.org.slug} kioskRowId={pairing.kiosk.id} autoStart={sp.new === '1'} />
+          <p className="mb-2 font-semibold text-ink-900">Key ลงทะเบียนสำหรับ {pairing.kiosk.name}</p>
+          <PairingPanel orgSlug={ctx.org.slug} kioskRowId={pairing.kiosk.id} autoStart={sp.new === '1'} kind="key" />
         </div>
       ) : null}
 
+      {canManage && !isStock ? (
+        <Card title="เพิ่มตู้จากคลัง" subtitle="ตู้ที่ยังไม่มีร้าน (ต้องรีเซ็ตและล็อกหลังทดสอบแล้ว) • มอบแล้วได้ Key สำหรับให้ลูกค้าลงทะเบียนที่ตู้" icon={<PackagePlus aria-hidden />}>
+          {full ? (
+            <Notice tone="warn">ลูกค้ามีตู้ครบโควตาแล้ว เพิ่มโควตาได้ที่แท็บ “ขีดจำกัดและสิทธิ์”</Notice>
+          ) : !stock.length ? (
+            <Notice tone="info">ไม่มีตู้ในคลัง • เพิ่มได้ที่เมนู “คลังตู้”</Notice>
+          ) : !activeBranches.length ? (
+            <Notice tone="warn">ลูกค้ายังไม่มีสาขาที่ใช้งาน</Notice>
+          ) : (
+            <ActionForm action={addFromStockAction.bind(null, id)} className="grid gap-4 sm:grid-cols-[1.4fr_1fr_auto] sm:items-end">
+              <FormField label="ตู้ในคลัง" name="kioskRowId" required>
+                <Select id="kioskRowId" name="kioskRowId" required defaultValue={stock.find((s) => s.movable)?.kiosk.id ?? ''}>
+                  {stock.map(({ kiosk: s, movable }) => (
+                    <option key={s.id} value={s.id} disabled={!movable}>
+                      {s.name} • {s.kioskId ?? s.formerKioskId ?? 'ยังไม่เคยลงทะเบียน'}
+                      {movable ? '' : ' (ลงทะเบียนอยู่ ต้องรีเซ็ตก่อน)'}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <FormField label="สาขา" name="branchId" required>
+                <Select id="stockBranchId" name="branchId" required defaultValue={activeBranches[0]!.id}>
+                  {activeBranches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </Select>
+              </FormField>
+              <SubmitButton>มอบให้ลูกค้าและออก Key</SubmitButton>
+            </ActionForm>
+          )}
+        </Card>
+      ) : null}
+
       {canManage ? (
-        <Card title="ลงทะเบียนตู้ใหม่ให้ลูกค้า" subtitle={`ใช้ ${formatQuota(quota.used, quota.quota)} ตู้ • หลังลงทะเบียนจะได้รหัสจับคู่สำหรับกรอกที่ตู้`} icon={<Plus aria-hidden />}>
+        <Card
+          title={isStock ? 'เพิ่มตู้เข้าคลัง' : 'ลงทะเบียนตู้ใหม่ให้ลูกค้า'}
+          subtitle={isStock ? 'ยังไม่ต้องมีร้าน • ได้ Key สำหรับช่างทดสอบ แล้วรีเซ็ตและล็อกก่อนมอบให้ร้าน' : `ใช้ ${formatQuota(quota.used, quota.quota)} ตู้ • หลังลงทะเบียนจะได้ Key สำหรับกรอกที่ตู้`}
+          icon={<Plus aria-hidden />}
+        >
           {full ? (
             <Notice tone="warn">ลูกค้ามีตู้ครบโควตาแล้ว เพิ่มโควตาได้ที่แท็บ “ขีดจำกัดและสิทธิ์”</Notice>
           ) : !activeBranches.length ? (
@@ -61,7 +103,7 @@ export default async function OrganizationKiosksPage({ params, searchParams }: {
                   ))}
                 </Select>
               </FormField>
-              <SubmitButton>ลงทะเบียนและสร้างรหัส</SubmitButton>
+              <SubmitButton>{isStock ? 'เพิ่มเข้าคลังและออก Key' : 'ลงทะเบียนและออก Key'}</SubmitButton>
             </ActionForm>
           )}
         </Card>
@@ -69,14 +111,9 @@ export default async function OrganizationKiosksPage({ params, searchParams }: {
 
       <Card
         flush
-        title="ตู้ทั้งหมดของลูกค้า"
-        subtitle="ปิดการใช้งาน: ตู้หยุดรับลูกค้าและรับเงิน เปิดกลับได้ทันทีโดยไม่ต้องจับคู่ใหม่"
+        title={isStock ? 'ตู้ในคลัง' : 'ตู้ทั้งหมดของลูกค้า'}
+        subtitle="ปิดการใช้งาน: ตู้หยุดรับลูกค้าและรับเงิน เปิดกลับได้ทันที • รีเซ็ตและล็อก: ตู้ล็อกจนกว่าจะใส่ Key ใหม่ (ก่อนย้ายร้านหรือคืนคลัง)"
         icon={<MonitorSmartphone aria-hidden />}
-        actions={
-          <Link href={sp.revoked === '1' ? base : `${base}?revoked=1`} className={buttonClass('ghost', 'sm')}>
-            {sp.revoked === '1' ? 'ซ่อนตู้ที่ยกเลิกแล้ว' : 'แสดงตู้ที่ยกเลิกแล้ว'}
-          </Link>
-        }
       >
         {rows.length ? (
           <Table bare>
@@ -135,8 +172,16 @@ export default async function OrganizationKiosksPage({ params, searchParams }: {
                         {canManage && (k.status === 'pending' || k.status === 'revoked') ? (
                           <Link href={`${base}?pair=${k.id}&new=1`} className={buttonClass('outline', 'sm')}>
                             <KeyRound className="size-4" aria-hidden />
-                            สร้างรหัสจับคู่
+                            ออก Key
                           </Link>
+                        ) : null}
+                        {canManage && !isStock && (k.status === 'pending' || k.status === 'revoked') ? (
+                          <ActionForm action={returnToStockAction.bind(null, id, k.id)} confirm={`คืน "${k.name}" เข้าคลัง? Key ที่ออกไว้จะใช้ไม่ได้`}>
+                            <SubmitButton variant="ghost" size="sm">
+                              <Archive className="size-4" aria-hidden />
+                              คืนเข้าคลัง
+                            </SubmitButton>
+                          </ActionForm>
                         ) : null}
                         {canManage && k.status === 'disabled' ? (
                           <ActionForm action={enableKioskAction.bind(null, id, k.id)} confirm={`เปิดการใช้งาน "${k.name}"?`}>
@@ -166,10 +211,13 @@ export default async function OrganizationKiosksPage({ params, searchParams }: {
                           </details>
                         ) : null}
                         {canManage && (k.status === 'active' || k.status === 'disabled') ? (
-                          <ActionForm action={unpairKioskPlatformAction.bind(null, id, k.id)} confirm={`ยกเลิกการเชื่อมต่อ "${k.name}"? ต้องจับคู่ใหม่ก่อนใช้งานอีกครั้ง`}>
+                          <ActionForm
+                            action={unpairKioskPlatformAction.bind(null, id, k.id)}
+                            confirm={`รีเซ็ตและล็อก "${k.name}"? ตู้ล้างการตั้งค่าจาก Admin และล็อกทั้งระบบจนกว่าจะใส่ Key ใหม่`}
+                          >
                             <SubmitButton variant="ghost" size="sm">
                               <Unlink className="size-4" aria-hidden />
-                              ยกเลิกการเชื่อมต่อ
+                              รีเซ็ตและล็อกตู้
                             </SubmitButton>
                           </ActionForm>
                         ) : null}
@@ -183,7 +231,7 @@ export default async function OrganizationKiosksPage({ params, searchParams }: {
         ) : (
           <div className="p-5">
             <EmptyState title="ลูกค้ายังไม่มีตู้" icon={<MonitorSmartphone aria-hidden />}>
-              ลงทะเบียนตู้ด้านบน แล้วกรอกรหัสจับคู่ที่หน้า Config ของตู้
+              {isStock ? 'เพิ่มตู้เข้าคลังด้านบน' : 'เพิ่มตู้จากคลัง หรือลงทะเบียนตู้ใหม่ด้านบน แล้วให้ลูกค้าใส่ Key ที่ตู้'}
             </EmptyState>
           </div>
         )}

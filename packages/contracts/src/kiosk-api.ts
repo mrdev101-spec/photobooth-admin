@@ -149,12 +149,14 @@ export type ConfigAck = z.input<typeof ConfigAckSchema>;
 
 export interface KioskCommand {
   id: string;
-  type: 'sync_config' | 'test_print' | 'upload_logs' | 'restart_app' | 'set_maintenance' | 'allow_reprint';
+  type: 'sync_config' | 'test_print' | 'upload_logs' | 'restart_app' | 'set_maintenance' | 'allow_reprint' | 'reprint' | 'cancel_print';
   payload: Record<string, unknown>;
 }
 
 export interface HeartbeatResponse {
   serverTime: string;
+  /** Who the kiosk belongs to now (it can be moved between the stock and customers). */
+  account?: { org: string; stock: boolean; kiosk: string; branch: string | null };
   latestRevision: number;
   manifestRevision: number;
   /** Maintenance screen on/off (set by the Admin). */
@@ -169,4 +171,82 @@ export interface HeartbeatResponse {
   disabled: boolean;
   disabledMessage: string | null;
   commands: KioskCommand[];
+}
+
+// ─── Realtime: GET /kiosk/wait (long poll) ───────────────────────────────────
+
+/**
+ * Answers as soon as something is new for the kiosk (newer settings, templates, commands), or
+ * after about 25 s with `changed: false`; the kiosk asks again straight away.
+ */
+export interface KioskWaitResponse {
+  changed: boolean;
+  revision: number;
+  manifestRevision: number;
+  commands: KioskCommand[];
+}
+
+export const CommandResultSchema = z.object({
+  status: z.enum(['done', 'failed']),
+  message: z.string().max(500).optional()
+});
+
+// ─── AI through the Admin (docs §8.5) ────────────────────────────────────────
+
+const imageDataUrl = z
+  .string()
+  .max(8_000_000)
+  .regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/, 'ต้องเป็นภาพ JPEG / PNG / WebP');
+
+/** POST /kiosk/ai/jobs — one customer image. A retry with the same requestId gets the same job. */
+export const AiJobRequestSchema = z.object({
+  requestId: z.string().regex(/^[A-Za-z0-9_-]{8,64}$/),
+  sceneId: z.string().regex(/^[a-z0-9-]{1,40}$/),
+  photo: imageDataUrl,
+  faceCrop: imageDataUrl.optional(),
+  /** The paid payment (Admin id) this image uses; omitted when the kiosk does not charge (free / simulated). */
+  paymentId: z.string().regex(/^pay_[A-Za-z0-9]+$/).optional()
+});
+export type AiJobRequest = z.infer<typeof AiJobRequestSchema>;
+
+/** GET /kiosk/ai/status — can this kiosk take AI customers now (checked before payment). */
+export interface KioskAiStatus {
+  available: boolean;
+  /** Why not: the platform has no AI key, the month's quota is used up, or the account is suspended. */
+  reason: 'not_configured' | 'quota' | 'suspended' | null;
+  month: string;
+  used: number;
+  /** null = unlimited */
+  quota: number | null;
+  provider: string | null;
+  model: string | null;
+}
+
+/** GET /kiosk/ai/jobs/{id} — the image itself is at /kiosk/ai/jobs/{id}/result once succeeded. */
+export interface KioskAiJob {
+  jobId: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  errorCode: string | null;
+  errorMessage: string | null;
+  durationMs: number | null;
+  refined: boolean;
+}
+
+// ─── Payments through the Admin (docs §8.4) ──────────────────────────────────
+
+/** POST /kiosk/payments — a PromptPay QR for one sale (amount in THB). */
+export const PaymentCreateSchema = z.object({
+  amount: z.number().int().min(10).max(10_000),
+  product: z.string().trim().max(100).default(''),
+  description: z.string().trim().max(200).default('')
+});
+
+/** GET /kiosk/payments/status — can the payment screen show a real QR now. */
+export interface KioskPaymentStatus {
+  enabled: boolean;
+  ready: boolean;
+  mode: 'test' | 'live';
+  /** Whose Stripe account takes the money: the company's or the shop's own. */
+  account: 'platform' | 'shop' | null;
+  reason: 'disabled' | 'live_not_allowed' | 'no_account' | 'no_email' | null;
 }

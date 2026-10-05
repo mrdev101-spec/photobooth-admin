@@ -36,7 +36,11 @@ export async function authenticateKiosk(req: NextRequest): Promise<KioskAuth> {
       .where(and(eq(kioskTokens.tokenHash, sha256Hex(token)), isNull(kioskTokens.revokedAt), inArray(kiosks.status, ['active', 'disabled']), isNull(organizations.deletedAt)))
       .limit(1)
   )[0];
-  if (!row) throw new KioskApiError('AD0001', 401);
+  if (!row) {
+    // A token the platform revoked (reset / moved): the kiosk locks itself until a new key
+    const revoked = (await db().select({ id: kioskTokens.id }).from(kioskTokens).where(eq(kioskTokens.tokenHash, sha256Hex(token))).limit(1))[0];
+    throw new KioskApiError(revoked ? 'AD0013' : 'AD0001', 401);
+  }
 
   // A copied data folder on another machine would present someone else's Kiosk ID header
   const claimed = req.headers.get('x-kiosk-id');

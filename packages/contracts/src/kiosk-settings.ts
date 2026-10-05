@@ -34,6 +34,71 @@ export const AdminPinSchema = z.object({
   hash: z.string().min(32)
 });
 
+// ─── Decorative text (the shop's own lines on a template) ──────────────────────
+
+/** Fonts the kiosk can print (photobooth-v1 customTemplates.js TEXT_FONTS): Thai + English first. */
+export const DECOR_FONTS = [
+  'Sarabun', 'Prompt', 'Kanit', 'Trirong', 'Taviraj', 'Charmonman', 'Srisakdi', 'Mali', 'Sriracha', 'Chonburi',
+  'Fredoka', 'Playfair Display', 'Caveat', 'Space Grotesk', 'Pacifico', 'Bangers', 'Courier Prime'
+] as const;
+export const DECOR_FIELDS = ['text', 'event.title', 'event.subtitle', 'event.date', 'brand.brandName'] as const;
+export const DECOR_MAX_ITEMS = 8;
+
+/**
+ * One text line on a template, in the template's own units: a 4x6 photo is 1200 x 1800, a
+ * badge 1000 x 1000 (the cut circle). Same shape as the kiosk's Config > ข้อความตกแต่ง.
+ */
+export const DecorTextSchema = z.object({
+  field: z.enum(DECOR_FIELDS),
+  text: z.string().max(120).default(''),
+  x: z.number().min(-200).max(2000),
+  y: z.number().min(-200).max(2000),
+  maxWidth: z.number().min(20).max(2000),
+  font: z.enum(DECOR_FONTS),
+  weight: z.number().int().min(300).max(900).default(700),
+  size: z.number().min(8).max(400),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  align: z.enum(['left', 'center', 'right']).default('center'),
+  /** arc-top / arc-bottom: along the badge's circle (badges only) */
+  path: z.enum(['line', 'arc-top', 'arc-bottom']).default('line'),
+  stroke: hexColor.default(''),
+  strokeWidth: z.number().min(0).max(40).default(0),
+  shadow: z.boolean().default(false)
+});
+export type DecorText = z.infer<typeof DecorTextSchema>;
+
+/** Template id → its lines. Built-in ids as in the catalog, uploaded templates as `tpl_…`. */
+const decorKey = z.string().regex(/^(tpl_[A-Za-z0-9]+|[a-z0-9-]{1,40})$/, 'รหัส template ไม่ถูกต้อง');
+
+// ─── A4 / A5 sheet layout (photo printer on sheet paper) ─────────────────────
+
+export const SHEET_SLOT_ASPECTS = ['2:3', '9:16', '1:3', '3:4', '1:1'] as const;
+const mm = z.number().min(0).max(420);
+
+/**
+ * Where 4x6 photos, badge areas and the queue number go on the sheet, in mm on the portrait
+ * page (photobooth-v1 a4Sheet.js). null in the settings = the kiosk's preset layout.
+ */
+export const SheetLayoutSchema = z.object({
+  photos: z
+    .array(
+      z.object({
+        x: mm,
+        y: mm,
+        rotated: z.boolean().default(false),
+        turn: z.enum(['cw', 'ccw']).default('cw'),
+        scale: z.number().min(0.3).max(3).default(1),
+        aspect: z.enum(SHEET_SLOT_ASPECTS).default('2:3')
+      })
+    )
+    .max(6),
+  zones: z.array(z.object({ x: mm, y: mm, w: z.number().min(10).max(420), h: z.number().min(10).max(420) })).max(8),
+  photoSpare: z.enum(['repeat', 'blank']).default('repeat'),
+  badgeSpare: z.enum(['repeat', 'blank']).default('blank'),
+  queue: z.object({ x: mm, y: mm, show: z.boolean().default(true) })
+});
+export type SheetLayout = z.infer<typeof SheetLayoutSchema>;
+
 /** Shape only (no cross-field checks) — use for .pick/.omit; validate with KioskSettingsSchema. */
 export const KioskSettingsBaseSchema = z.object({
     appMode: z.enum(modeIds),
@@ -98,8 +163,13 @@ export const KioskSettingsBaseSchema = z.object({
     }),
     paper: z.object({
       photo: z.enum(['4x6', 'a4', 'a5']),
-      badge: z.enum(['4x6', 'a4', 'with-photo'])
+      badge: z.enum(['4x6', 'a4', 'with-photo']),
+      /** Sheet layouts per paper size; null = the kiosk's preset. */
+      a4Layout: SheetLayoutSchema.nullable(),
+      a5Layout: SheetLayoutSchema.nullable()
     }),
+    /** Decorative text per template (business: the event's look). */
+    decor: z.record(decorKey, z.array(DecorTextSchema).max(DECOR_MAX_ITEMS)),
     payment: z.object({
       enabled: z.boolean(),
       /** Free use: the kiosk skips payment in every mode (logged as "ไม่เก็บเงิน"). */
@@ -163,7 +233,8 @@ export function defaultKioskSettings(): KioskSettings {
     print: { photo: true, badge: true, queueSlip: true, queuePrefix: '', queueOnPhoto: 'off' },
     attract: { showBadges: true },
     sound: { voiceGuide: true, voiceVolume: 90, musicOn: true, musicTrack: 'kawaii', musicVolume: 40 },
-    paper: { photo: '4x6', badge: '4x6' },
+    paper: { photo: '4x6', badge: '4x6', a4Layout: null, a5Layout: null },
+    decor: {},
     payment: { enabled: false, bypass: false, mode: 'test', email: '', qrTimeoutSec: 180 },
     ai: { demoMode: false },
     share: { enabled: false, retentionDays: 7 },

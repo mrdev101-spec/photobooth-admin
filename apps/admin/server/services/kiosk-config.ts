@@ -1,5 +1,5 @@
 import 'server-only';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { AI_SCENE_IDS, BADGE_FRAME_IDS, CLASSIC_TEMPLATE_IDS, PHOTO_LAYOUT_IDS } from '@photobooth/catalog';
 import { KioskSettingsBaseSchema, KioskSettingsSchema, withSettingsDefaults, type KioskSettings } from '@photobooth/contracts';
@@ -101,7 +101,7 @@ export async function checkBusinessRules(ctx: OrgContext, s: KioskSettings) {
   const uploaded = await db()
     .select({ kind: catalogTemplates.kind, id: catalogTemplates.id })
     .from(catalogTemplates)
-    .where(and(eq(catalogTemplates.source, 'uploaded'), inArray(catalogTemplates.status, ['published', 'retired'])));
+    .where(and(eq(catalogTemplates.source, 'uploaded'), inArray(catalogTemplates.status, ['published', 'retired']), or(isNull(catalogTemplates.orgId), eq(catalogTemplates.orgId, ctx.org.id))));
   const known = (kind: (typeof catalogTemplates.$inferSelect)['kind'], builtin: readonly string[]) => (id: string) => builtin.includes(id) || uploaded.some((u) => u.kind === kind && u.id === id);
   const checks: [string, string[], (id: string) => boolean, string][] = [
     ['templates.photoLayouts', [...s.templates.photoLayouts, s.templates.photoDefaultLayout], known('photo-4x6', PHOTO_LAYOUT_IDS), 'กรอบ'],

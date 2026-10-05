@@ -58,7 +58,9 @@ export const OrderInputSchema = z
     orderedAt: z.iso.datetime(),
     expiresAt: z.iso.datetime().optional(),
     /** Kiosk-printed orders may report the print together with the order. */
-    printedAt: z.iso.datetime().optional()
+    printedAt: z.iso.datetime().optional(),
+    /** Queue number on the slip / sheet (A001 …). */
+    queueNo: z.string().max(16).optional()
   })
   .superRefine((o, ctx) => {
     if (o.fulfillment === 'pickup') {
@@ -75,3 +77,47 @@ export interface OrderResponse {
 }
 
 export const OrderPrintedSchema = z.object({ printedAt: z.iso.datetime().optional(), printer: z.string().max(120).optional() });
+
+// ─── Event Console: POST /kiosk/events (the kiosk's outbox, in order) ───────
+
+/** A small JPEG of the order (data URL), ≤ 300 KB. */
+const thumbnail = z
+  .string()
+  .max(420_000)
+  .regex(/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/, 'ภาพย่อต้องเป็น JPEG');
+
+export const PRINT_JOB_KINDS = ['photo', 'badge', 'slip'] as const;
+export const PRINT_JOB_STATUS = ['queued', 'printing', 'printed', 'failed', 'cancelled'] as const;
+
+export const KioskEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('order'), order: OrderInputSchema, thumbnail: thumbnail.optional() }),
+  z.object({
+    type: z.literal('job'),
+    clientOrderId: z.string().min(1).max(64),
+    clientJobId: z.string().min(1).max(64),
+    kind: z.enum(PRINT_JOB_KINDS),
+    status: z.enum(PRINT_JOB_STATUS),
+    printer: z.string().max(200).optional(),
+    error: z.string().max(500).optional(),
+    /** 1 = first print, 2+ = reprints from the Event Console. */
+    attempt: z.number().int().min(1).max(99).optional(),
+    at: z.iso.datetime()
+  }),
+  z.object({
+    type: z.literal('files'),
+    clientOrderId: z.string().min(1).max(64),
+    downloadUrl: httpUrl.optional(),
+    files: z.array(OrderFileSchema).max(10).default([])
+  })
+]);
+export type KioskEvent = z.input<typeof KioskEventSchema>;
+
+export const KioskEventsRequestSchema = z.object({ events: z.array(z.unknown()).min(1).max(50) });
+
+/** Per event, in the same order. `retry` = keep it and send again later (e.g. its order is not in yet). */
+export interface KioskEventResult {
+  ok: boolean;
+  retry?: boolean;
+  code?: string;
+  message?: string;
+}

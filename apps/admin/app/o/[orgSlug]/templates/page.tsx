@@ -10,6 +10,7 @@ import { EmptyState, Notice, PageHeader, Select, buttonClass } from '@/component
 import { resolvePermissions } from '@/lib/config-permissions';
 import { TEMPLATE_KINDS, type TemplateKind } from '@/lib/template-visibility';
 import { TemplateGallery } from './template-gallery';
+import { ShopTemplates } from './shop-templates';
 
 export const metadata: Metadata = { title: 'Template' };
 
@@ -19,11 +20,13 @@ export default async function TemplatesPage({ params, searchParams }: { params: 
   const ctx = await requireOrg(orgSlug, 'kiosk.view');
   const kiosks = (await listKiosks(ctx)).filter((k) => k.kiosk.currentRevision > 0);
   const base = `/o/${ctx.org.slug}/templates`;
+  const own = <ShopTemplates orgSlug={ctx.org.slug} orgId={ctx.org.id} canManage={can(ctx.principal, 'template.manage')} />;
 
   if (!kiosks.length) {
     return (
       <>
         <PageHeader title="Template" description="เลือกว่าตู้แต่ละตู้แสดง template ไหนให้ลูกค้าเลือก" />
+        {own}
         <EmptyState title="ยังไม่มีตู้ที่เชื่อมต่อ" icon={<MonitorSmartphone aria-hidden />}>
           เลือก template ได้หลังจากตู้เชื่อมต่อแล้ว
         </EmptyState>
@@ -64,12 +67,14 @@ export default async function TemplatesPage({ params, searchParams }: { params: 
       <Notice tone="info" className="mb-5">
         <span className="inline-flex items-start gap-1">
           <Info className="sr-only" aria-hidden />
-          Template ทั้งหมดมาจากผู้ให้บริการ คุณเลือกได้ว่าจะแสดงหรือซ่อน การเพิ่มหรือลบ template ทำได้ที่ส่วนกลางเท่านั้น •{' '}
+          Template จากผู้ให้บริการ และ template ของร้าน (ถ้าเปิดสิทธิ์) เลือกได้ว่าตู้ไหนแสดงหรือซ่อน •{' '}
           <Link href={`/o/${ctx.org.slug}/kiosks/${kioskRowId}/config`} className="underline">
             ตั้งแบบเริ่มต้นและค่าอื่นของตู้
           </Link>
         </span>
       </Notice>
+
+      {own}
 
       {hidden ? (
         <Notice tone="warn">หมวดนี้จัดการโดยผู้ให้บริการ</Notice>

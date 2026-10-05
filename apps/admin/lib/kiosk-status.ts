@@ -26,8 +26,8 @@ export const CONNECTION_LABEL: Record<Connection, { label: string; tone: Tone }>
   stale: { label: 'ขาดการติดต่อ', tone: 'warn' },
   offline: { label: 'ออฟไลน์', tone: 'danger' },
   never: { label: 'ยังไม่ส่งสถานะ', tone: 'muted' },
-  pending: { label: 'รอจับคู่', tone: 'info' },
-  revoked: { label: 'ยกเลิกการเชื่อมต่อ', tone: 'muted' },
+  pending: { label: 'รอลงทะเบียน', tone: 'info' },
+  revoked: { label: 'ล็อก (รอ Key)', tone: 'muted' },
   disabled: { label: 'ปิดใช้งานโดยผู้ให้บริการ', tone: 'danger' }
 };
 

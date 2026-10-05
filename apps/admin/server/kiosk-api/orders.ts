@@ -15,7 +15,7 @@ type OrderData = z.output<typeof OrderInputSchema>;
  * Image URLs must point into this customer's own bucket (and this kiosk's folder), so a kiosk
  * cannot make the Admin show arbitrary pictures. Without storage (dev) any http(s) URL passes.
  */
-async function checkFiles(auth: KioskAuth, data: OrderData) {
+export async function checkFiles(auth: KioskAuth, data: Pick<OrderData, 'files'>) {
   const storage = (await db().select({ publicUrl: orgStorage.publicUrl }).from(orgStorage).where(eq(orgStorage.orgId, auth.org.id)).limit(1))[0];
   const folder = `p/${auth.kiosk.kioskId}/`;
   for (const f of data.files) {
@@ -64,7 +64,9 @@ export async function createOrderFromKiosk(auth: KioskAuth, data: OrderData): Pr
         downloadUrl: data.downloadUrl ?? null,
         orderedAt: new Date(data.orderedAt),
         expiresAt: data.expiresAt ? new Date(data.expiresAt) : null,
-        printedAt
+        printedAt,
+        queueNo: data.queueNo ?? null,
+        eventId: kiosk.eventId ?? null
       });
       if (data.files.length) {
         await tx.insert(orderFiles).values(

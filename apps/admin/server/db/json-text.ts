@@ -17,3 +17,11 @@ export const jsonText = <T>(name: string) =>
       return (typeof value === 'string' ? JSON.parse(value) : value) as T;
     }
   })(name);
+
+/** MEDIUMBLOB (up to 16 MB) as a Buffer. */
+export const mediumBlob = (name: string) =>
+  customType<{ data: Buffer; driverData: Buffer }>({
+    dataType: () => 'mediumblob',
+    toDriver: (v) => v,
+    fromDriver: (v) => (Buffer.isBuffer(v) ? v : Buffer.from(v as unknown as Uint8Array))
+  })(name);

@@ -1,0 +1,2 @@
+ALTER TABLE `kiosk_pair_codes` ADD `kind` enum('pair','key') DEFAULT 'pair' NOT NULL;--> statement-breakpoint
+ALTER TABLE `organizations` ADD `kind` enum('customer','stock') DEFAULT 'customer' NOT NULL;

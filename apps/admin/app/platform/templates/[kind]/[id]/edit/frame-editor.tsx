@@ -14,6 +14,23 @@ type RectSlot = Extract<FrameSpec['photoSlots'][number], { x: number }>;
 type CircleSlot = Extract<FrameSpec['photoSlots'][number], { shape: 'circle' }>;
 type Sel = { type: 'photo' | 'text'; index: number } | null;
 
+type StudioResult = { ok: true; message?: string } | { ok: false; message: string };
+/** Server actions the editor calls (the platform's by default; a customer's studio passes its own). */
+export interface FrameStudioActions {
+  uploadFile: (kind: string, id: string, form: FormData) => Promise<StudioResult>;
+  saveDraft: (kind: string, id: string, form: FormData) => Promise<StudioResult>;
+  publishDraft: (kind: string, id: string) => Promise<StudioResult>;
+  discardDraft: (kind: string, id: string) => Promise<StudioResult>;
+  removeFile: (kind: string, id: string, slot: string) => Promise<StudioResult>;
+}
+const PLATFORM_ACTIONS: FrameStudioActions = {
+  uploadFile: uploadFileAction,
+  saveDraft: saveDraftAction,
+  publishDraft: publishDraftAction,
+  discardDraft: discardDraftAction,
+  removeFile: removeFileAction
+};
+
 export interface EditorFile {
   url: string;
   width?: number;
@@ -56,7 +73,8 @@ export function FrameEditor({
   overlay,
   sample,
   draftVersion,
-  hasPublished
+  hasPublished,
+  actions = PLATFORM_ACTIONS
 }: {
   kind: FrameKind;
   id: string;
@@ -65,6 +83,7 @@ export function FrameEditor({
   sample: EditorFile | null;
   draftVersion: number | null;
   hasPublished: boolean;
+  actions?: FrameStudioActions;
 }) {
   const router = useRouter();
   const [spec, setSpec] = useState<FrameSpec>(initialSpec);
@@ -198,7 +217,7 @@ export function FrameEditor({
       const fd = new FormData();
       fd.set('slot', slot);
       fd.set('file', file);
-      const r = await uploadFileAction(kind, id, fd);
+      const r = await actions.uploadFile(kind, id, fd);
       setMsg({ ok: r.ok, text: r.message ?? (r.ok ? 'อัปโหลดแล้ว' : '') });
       if (r.ok) router.refresh();
     });
@@ -212,7 +231,7 @@ export function FrameEditor({
     fd.set('note', note);
     // Only a preview with the real overlay is worth showing in the catalog
     if (images.overlay) fd.set('preview', await previewBlob(full), 'preview.jpg');
-    const r = await saveDraftAction(kind, id, fd);
+    const r = await actions.saveDraft(kind, id, fd);
     setMsg({ ok: r.ok, text: r.message ?? '' });
     if (r.ok) {
       setDirty(false);
@@ -225,7 +244,7 @@ export function FrameEditor({
   const publish = () =>
     start(async () => {
       if (!(await save())) return;
-      const r = await publishDraftAction(kind, id);
+      const r = await actions.publishDraft(kind, id);
       setMsg({ ok: r.ok, text: r.message ?? '' });
       if (r.ok) router.refresh();
     });
@@ -233,7 +252,7 @@ export function FrameEditor({
   const discard = () =>
     start(async () => {
       if (!window.confirm('ยกเลิกร่างนี้และกลับไปใช้เวอร์ชันที่เผยแพร่อยู่?')) return;
-      const r = await discardDraftAction(kind, id);
+      const r = await actions.discardDraft(kind, id);
       setMsg({ ok: r.ok, text: r.message ?? '' });
       if (r.ok) {
         setDirty(false);
@@ -331,7 +350,7 @@ export function FrameEditor({
                 <input type="file" accept="image/jpeg,image/png" className="sr-only" disabled={pending} onChange={(e) => upload('sample', e.target.files?.[0])} />
               </label>
               {sample ? (
-                <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => start(async () => { const r = await removeFileAction(kind, id, 'sample'); if (r.ok) router.refresh(); })}>
+                <Button type="button" variant="ghost" size="sm" disabled={pending} onClick={() => start(async () => { const r = await actions.removeFile(kind, id, 'sample'); if (r.ok) router.refresh(); })}>
                   ลบ
                 </Button>
               ) : null}

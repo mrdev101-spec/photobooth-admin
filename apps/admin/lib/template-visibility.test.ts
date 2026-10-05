@@ -12,7 +12,8 @@ describe('template visibility', () => {
 
   it('resolves "all" to every published template', () => {
     expect(visibleIds(t, 'photo-4x6')).toEqual(publishedIds('photo-4x6'));
-    expect(visibleIds(t, 'ai-scene')).toHaveLength(10);
+    expect(visibleIds(t, 'ai-scene')).toEqual(publishedIds('ai-scene'));
+    expect(visibleIds(t, 'ai-scene')).toHaveLength(22);
   });
 
   it('stores an explicit list when some are hidden, and [] when all are shown again', () => {

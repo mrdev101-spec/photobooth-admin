@@ -87,7 +87,7 @@ export default async function KioskConfigPage({ params }: { params: Promise<{ or
         storageConfigured={await hasStorage(ctx.org.id)}
         permissions={resolvePermissions(ctx.org.configPermissions)}
         isPlatform={!!ctx.principal.platformRole}
-        catalog={await editorCatalog()}
+        catalog={await editorCatalog(ctx.org.id)}
         sources={(await editorSources(ctx)).map((x) => ({ id: x.source.kind === 'event' ? x.source.id : null, label: x.label, settings: x.settings, hasPin: x.hasPin }))}
         initialEventId={kiosk.eventId}
         initialOwn={kiosk.ownSections}

@@ -88,7 +88,7 @@ export default async function EventPage({ params }: { params: Promise<{ orgSlug:
         storageConfigured={await hasStorage(ctx.org.id)}
         permissions={resolvePermissions(ctx.org.configPermissions)}
         isPlatform={!!ctx.principal.platformRole}
-        catalog={await editorCatalog()}
+        catalog={await editorCatalog(ctx.org.id)}
       />
     </>
   );

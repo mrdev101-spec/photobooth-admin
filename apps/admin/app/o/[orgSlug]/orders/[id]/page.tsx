@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ChevronLeft, Download, History, ImageIcon, ReceiptText, RotateCcw } from 'lucide-react';
+import { Ban, ChevronLeft, Download, History, ImageIcon, Printer, ReceiptText, RotateCcw } from 'lucide-react';
 import { formatPickupCode } from '@photobooth/contracts';
 import { requireOrg } from '@/server/auth/context';
 import { can } from '@/server/auth/rbac';
@@ -11,7 +11,20 @@ import { ActionForm, SubmitButton } from '@/components/form';
 import { Badge, Card, DetailRow, Notice, PageHeader } from '@/components/ui';
 import { FLAG_LABELS, PAYMENT_LABELS, productLabel, statusLabel } from '@/lib/order-labels';
 import { formatBaht, formatDateTime } from '@/lib/format';
-import { allowReprintAction } from '../actions';
+import { allowReprintAction, orderCommandAction } from '../actions';
+import { orderPrintState } from '@/server/services/kiosk-commands';
+import { AutoRefresh } from '@/components/auto-refresh';
+
+const JOB_KIND: Record<string, string> = { photo: 'แผ่นภาพ', badge: 'แผ่นเข็มกลัด', slip: 'ใบคิว' };
+const JOB_STATUS: Record<string, { label: string; tone: 'success' | 'warning' | 'danger' | 'info' | 'neutral' }> = {
+  queued: { label: 'รอพิมพ์', tone: 'info' },
+  printing: { label: 'กำลังพิมพ์', tone: 'warning' },
+  printed: { label: 'พิมพ์แล้ว', tone: 'success' },
+  failed: { label: 'ล้มเหลว', tone: 'danger' },
+  cancelled: { label: 'ยกเลิกแล้ว', tone: 'neutral' }
+};
+const CMD_LABEL: Record<string, string> = { reprint: 'พิมพ์ซ้ำ', cancel_print: 'ยกเลิกคิวพิมพ์' };
+const CMD_STATUS: Record<string, string> = { pending: 'รอตู้รับคำสั่ง', sent: 'ตู้กำลังทำ', done: 'สำเร็จ', failed: 'ไม่สำเร็จ' };
 
 export const metadata: Metadata = { title: 'ออเดอร์' };
 
@@ -26,6 +39,9 @@ export default async function OrderPage({ params }: { params: Promise<{ orgSlug:
     throw err;
   });
   const status = effectiveStatus(o);
+  const printState = o.fulfillment === 'kiosk' ? await orderPrintState(ctx, o.id) : null;
+  const canAct = can(ctx.principal, 'console.act', { branchId: o.branchId });
+  const busy = printState?.commands.some((c) => c.status === 'pending' || c.status === 'sent') || printState?.jobs.some((j) => j.status === 'printing' || j.status === 'queued');
   const st = statusLabel(status, o.fulfillment);
   const pay = PAYMENT_LABELS[o.paymentKind]!;
   const expired = status === 'expired' || (!!o.expiresAt && o.expiresAt.getTime() < Date.now());
@@ -57,6 +73,7 @@ export default async function OrderPage({ params }: { params: Promise<{ orgSlug:
         description={`${product} • ${o.kioskName}${o.branchName ? ` (${o.branchName})` : ''}`}
       />
 
+      {busy ? <AutoRefresh seconds={3} /> : null}
       {o.flags?.length ? (
         <Notice tone="danger" title="ออเดอร์นี้ต้องตรวจสอบ" className="mb-5">
           {o.flags.map((f) => FLAG_LABELS[f] ?? f).join(' • ')} ยอดนี้นับเป็นเงินจริงตามที่ตู้แจ้ง ติดต่อผู้ดูแลแพลตฟอร์มเพื่อตรวจสอบกับ Stripe
@@ -76,6 +93,9 @@ export default async function OrderPage({ params }: { params: Promise<{ orgSlug:
                 </figure>
               ))}
             </div>
+          ) : o.hasThumb ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={`/o/${ctx.org.slug}/orders/${o.id}/thumb`} alt="ภาพย่อของออเดอร์" className="h-72 w-auto rounded-lg border border-ink-200 bg-ink-50 object-contain shadow-card" />
           ) : (
             <p className="text-ink-500">{expired ? 'ภาพหมดอายุแล้ว' : 'ออเดอร์นี้ไม่มีไฟล์ภาพ (พิมพ์ที่ตู้)'}</p>
           )}
@@ -114,6 +134,59 @@ export default async function OrderPage({ params }: { params: Promise<{ orgSlug:
               ))}
             </ol>
           </Card>
+
+          {printState ? (
+            <Card title="การพิมพ์ที่ตู้" icon={<Printer aria-hidden />}>
+              {printState.jobs.length ? (
+                <ul className="flex flex-col gap-2">
+                  {printState.jobs.map((j) => {
+                    const js = JOB_STATUS[j.status] ?? { label: j.status, tone: 'neutral' as const };
+                    return (
+                      <li key={j.id} className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-ink-900">{JOB_KIND[j.kind] ?? j.kind}</span>
+                        <Badge tone={js.tone} dot>
+                          {js.label}
+                        </Badge>
+                        {j.attempts > 1 ? <span className="text-xs text-ink-500">พิมพ์ {j.attempts} ครั้ง</span> : null}
+                        <span className="w-full text-xs text-ink-500">
+                          {j.printer ?? ''}
+                          {j.error ? ` • ${j.error}` : ''}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="text-sm text-ink-500">ยังไม่มีข้อมูลการพิมพ์จากตู้</p>
+              )}
+              {printState.commands.length ? (
+                <ul className="mt-3 flex flex-col gap-1 border-t border-ink-100 pt-3 text-sm text-ink-600">
+                  {printState.commands.slice(0, 5).map((c) => (
+                    <li key={c.id}>
+                      {CMD_LABEL[c.type] ?? c.type}: <span className="font-medium">{CMD_STATUS[c.status] ?? c.status}</span>
+                      {c.message ? ` • ${c.message}` : ''} <span className="text-xs text-ink-400">({formatDateTime(c.createdAt)})</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {canAct ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <ActionForm action={orderCommandAction.bind(null, ctx.org.slug, o.id, 'reprint')} confirm="สั่งตู้พิมพ์ออเดอร์นี้อีกครั้ง?">
+                    <SubmitButton variant="outline" size="sm">
+                      <RotateCcw className="size-4" aria-hidden />
+                      พิมพ์ซ้ำที่ตู้
+                    </SubmitButton>
+                  </ActionForm>
+                  <ActionForm action={orderCommandAction.bind(null, ctx.org.slug, o.id, 'cancel_print')} confirm="ยกเลิกงานพิมพ์ของออเดอร์นี้ที่ยังค้างในคิวเครื่องพิมพ์?">
+                    <SubmitButton variant="ghost" size="sm">
+                      <Ban className="size-4" aria-hidden />
+                      ยกเลิกคิวพิมพ์
+                    </SubmitButton>
+                  </ActionForm>
+                </div>
+              ) : null}
+            </Card>
+          ) : null}
 
           {o.fulfillment === 'pickup' && o.status === 'handed_over' && can(ctx.principal, 'order.reprint', { branchId: o.branchId }) ? (
             <Card title="พิมพ์ซ้ำ" icon={<RotateCcw aria-hidden />}>

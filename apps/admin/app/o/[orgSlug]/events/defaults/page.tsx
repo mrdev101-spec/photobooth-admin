@@ -53,7 +53,7 @@ export default async function DefaultsPage({ params }: { params: Promise<{ orgSl
         storageConfigured={await hasStorage(ctx.org.id)}
         permissions={resolvePermissions(ctx.org.configPermissions)}
         isPlatform={!!ctx.principal.platformRole}
-        catalog={await editorCatalog()}
+        catalog={await editorCatalog(ctx.org.id)}
       />
     </>
   );

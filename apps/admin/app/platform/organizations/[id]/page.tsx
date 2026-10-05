@@ -4,6 +4,8 @@ import { orgContextForPlatform, requirePlatform } from '@/server/auth/context';
 import { canPlatform } from '@/server/auth/rbac';
 import { listAllKiosks } from '@/server/services/kiosks';
 import { memberUsage } from '@/server/services/members';
+import { orgAiUsage } from '@/server/services/ai-jobs';
+import { aiUsageLevel } from '@/components/ai-usage';
 import { ActionForm, FormField, SubmitButton } from '@/components/form';
 import { Badge, Card, Input, StatCard } from '@/components/ui';
 import { connectionOf } from '@/lib/kiosk-status';
@@ -18,7 +20,8 @@ export default async function OrganizationOverviewPage({ params }: { params: Pro
   const ctx = await orgContextForPlatform(platform, id);
   const org = ctx.org;
   const canManage = canPlatform(platform.user.platformRole, 'platform.org.manage');
-  const [kiosks, users] = await Promise.all([listAllKiosks({ orgId: org.id }), memberUsage(ctx)]);
+  const [kiosks, users, ai] = await Promise.all([listAllKiosks({ orgId: org.id }), memberUsage(ctx), orgAiUsage(org)]);
+  const aiLevel = aiUsageLevel(ai.used, ai.quota);
   const now = Date.now();
   const online = kiosks.filter((k) => connectionOf(k.kiosk, now) === 'online').length;
   const disabled = kiosks.filter((k) => k.kiosk.status === 'disabled').length;
@@ -31,7 +34,14 @@ export default async function OrganizationOverviewPage({ params }: { params: Pro
         <StatCard tone="primary" label="ตู้ / โควตา" value={formatQuota(kiosks.length, org.kioskQuota)} icon={<Gauge aria-hidden />} href={`${base}/kiosks`} />
         <StatCard label="ตู้ออนไลน์" value={`${online} / ${paired}`} hint={disabled ? `ปิดใช้งาน ${disabled} ตู้` : undefined} icon={<MonitorSmartphone aria-hidden />} href={`${base}/kiosks`} />
         <StatCard label="ผู้ใช้ / โควตา" value={formatQuota(users.used, users.quota)} icon={<Users aria-hidden />} href={`${base}/users`} />
-        <StatCard label="ภาพ AI ต่อเดือน" value={org.aiMonthlyQuota == null ? 'ไม่จำกัด' : org.aiMonthlyQuota.toLocaleString('th-TH')} icon={<Sparkles aria-hidden />} href={`${base}/limits`} />
+        <StatCard
+          label={`ภาพ AI เดือนนี้ / โควตา`}
+          value={formatQuota(ai.used, ai.quota)}
+          hint={aiLevel === 'full' ? 'ครบโควตา: โหมด AI ปิดจนถึงเดือนหน้า' : aiLevel === 'warn' ? 'ใกล้ครบโควตา' : ai.failed ? `ไม่สำเร็จ ${ai.failed} ครั้ง (ไม่นับ)` : undefined}
+          tone={aiLevel === 'full' ? 'danger' : 'default'}
+          icon={<Sparkles aria-hidden />}
+          href={`${base}/limits`}
+        />
       </div>
 
       <div className="grid gap-5 lg:grid-cols-3">

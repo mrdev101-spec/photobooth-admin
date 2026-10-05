@@ -1,4 +1,4 @@
-import { Building2, LayoutDashboard, LayoutTemplate, MonitorSmartphone, ScrollText, TriangleAlert } from 'lucide-react';
+import { Building2, LayoutDashboard, LayoutTemplate, MonitorSmartphone, ScrollText, TriangleAlert, Archive, Sparkles, Landmark } from 'lucide-react';
 import { requirePlatform } from '@/server/auth/context';
 import { PLATFORM_ROLE_LABELS } from '@/server/auth/rbac';
 import { organizationsForUser } from '@/server/services/organizations';
@@ -21,13 +21,16 @@ export default async function PlatformLayout({ children }: { children: React.Rea
           title: 'ลูกค้า',
           items: [
             { href: '/platform/organizations', label: 'บัญชีลูกค้า', icon: <Building2 aria-hidden /> },
-            { href: '/platform/kiosks', label: 'ตู้ทั้งหมด', icon: <MonitorSmartphone aria-hidden /> }
+            { href: '/platform/kiosks', label: 'ตู้ทั้งหมด', icon: <MonitorSmartphone aria-hidden /> },
+            { href: '/platform/stock', label: 'คลังตู้', icon: <Archive aria-hidden /> }
           ]
         },
         {
           title: 'ระบบ',
           items: [
             { href: '/platform/templates', label: 'คลัง Template', icon: <LayoutTemplate aria-hidden /> },
+            { href: '/platform/ai', label: 'ตั้งค่า AI', icon: <Sparkles aria-hidden /> },
+            { href: '/platform/payments', label: 'การรับเงิน', icon: <Landmark aria-hidden /> },
             { href: '/platform/error-codes', label: 'รหัสข้อผิดพลาด', icon: <TriangleAlert aria-hidden /> },
             { href: '/platform/audit', label: 'Audit log', icon: <ScrollText aria-hidden /> }
           ]

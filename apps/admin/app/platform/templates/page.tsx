@@ -58,7 +58,7 @@ export default async function PlatformTemplatesPage({ searchParams }: { searchPa
                 <span className="font-semibold text-ink-900 group-hover:text-primary-700">{r.name}</span>
                 <span className="flex items-center gap-2">
                   <code className="truncate text-xs text-ink-500">{r.id}</code>
-                  {r.source === 'uploaded' ? <Badge tone="violet">อัปโหลด</Badge> : null}
+                  {r.source === 'uploaded' ? <Badge tone="violet">{r.ownerOrgId ? 'ของร้าน' : 'อัปโหลด'}</Badge> : null}
                 </span>
                 <span className="mt-auto flex flex-wrap items-center gap-2 pt-2">
                   {r.status === 'published' ? (

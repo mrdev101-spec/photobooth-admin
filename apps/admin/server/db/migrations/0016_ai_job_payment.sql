@@ -1,0 +1,1 @@
+ALTER TABLE `ai_jobs` ADD `payment_id` varchar(32);

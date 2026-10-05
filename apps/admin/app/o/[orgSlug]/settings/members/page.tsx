@@ -18,6 +18,7 @@ const ROLE_HINTS: Record<OrgRole, string> = {
   manager: 'ตู้ การตั้งค่า template ออเดอร์ รายงาน (จำกัดสาขาได้)',
   designer: 'template และธีมงาน',
   pickup_staff: 'หน้าจุดรับรูปเท่านั้น (จำกัดสาขาได้)',
+  event_staff: 'Event Console เท่านั้น: ดูตู้ คิวพิมพ์ ภาพ สั่งพิมพ์ซ้ำ/ยกเลิกคิว (จำกัดสาขาได้)',
   viewer: 'ดูภาพรวมและรายงาน'
 };
 

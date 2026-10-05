@@ -15,7 +15,8 @@ export const metadata: Metadata = { title: 'ภาพรวมแพลตฟอ
 /** Platform dashboard: customers per status, fleet health across every customer, kiosks that need attention. */
 export default async function PlatformOverviewPage() {
   const ctx = await requirePlatform();
-  const [orgs, kiosks, flagged] = await Promise.all([listOrganizations(), listAllKiosks(), flaggedOrdersByOrg(ctx, new Date(Date.now() - 30 * 86_400_000))]);
+  const [orgs, allKiosks, flagged] = await Promise.all([listOrganizations(), listAllKiosks(), flaggedOrdersByOrg(ctx, new Date(Date.now() - 30 * 86_400_000))]);
+  const kiosks = allKiosks.filter((k) => k.kiosk.status !== 'revoked');
   const now = Date.now();
 
   const active = orgs.filter((o) => o.status === 'active').length;

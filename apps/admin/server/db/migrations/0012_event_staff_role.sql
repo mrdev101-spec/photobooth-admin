@@ -1,0 +1,1 @@
+ALTER TABLE `memberships` MODIFY COLUMN `role` enum('owner','manager','designer','pickup_staff','event_staff','viewer') NOT NULL;

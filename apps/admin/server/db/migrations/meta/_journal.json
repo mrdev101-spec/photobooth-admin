@@ -71,6 +71,62 @@
       "when": 1791105017835,
       "tag": "0009_kiosk_emergency",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1791113507878,
+      "tag": "0010_kiosk_stock_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "5",
+      "when": 1791131989703,
+      "tag": "0011_event_console_orders",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "5",
+      "when": 1791132080606,
+      "tag": "0012_event_staff_role",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "5",
+      "when": 1791135317831,
+      "tag": "0013_kiosk_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "5",
+      "when": 1791142728000,
+      "tag": "0014_ai_through_admin",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "5",
+      "when": 1791161582662,
+      "tag": "0015_payments_through_admin",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1791161803685,
+      "tag": "0016_ai_job_payment",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "5",
+      "when": 1791165569512,
+      "tag": "0017_shop_templates",
+      "breakpoints": true
     }
   ]
 }

@@ -3,7 +3,9 @@
 import { useRouter } from 'next/navigation';
 import { createContext, useContext, useMemo, useState, useTransition, type ReactNode } from 'react';
 import clsx from 'clsx';
-import { Layers, Link2, Lock, BadgeCheck, Download, Frame, IdCard, LayoutGrid, Music, Palette, Printer, QrCode, ReceiptText, Ruler, ShoppingBag, Sparkles, Timer } from 'lucide-react';
+import { Layers, Link2, Lock, BadgeCheck, Download, Frame, IdCard, LayoutGrid, Music, Palette, Printer, QrCode, ReceiptText, Ruler, ShoppingBag, Sparkles, Timer, Type } from 'lucide-react';
+import { DecorTextEditor } from '@/components/decor-text-editor';
+import { SheetLayoutEditor } from '@/components/sheet-layout-editor';
 import {
   AI_SCENES,
   APP_MODES,
@@ -67,19 +69,26 @@ interface Props {
   initialOwn?: string[] | null;
 }
 
-type CatalogEntry = { id: string; name: string; desc?: string };
+type CatalogEntry = { id: string; name: string; desc?: string; image?: string };
 export interface EditorCatalog {
   photo: CatalogEntry[];
   badge: CatalogEntry[];
   classic: CatalogEntry[];
   ai: CatalogEntry[];
 }
-const BUILTIN_EDITOR_CATALOG: EditorCatalog = { photo: [...PHOTO_LAYOUTS], badge: [...BADGE_FRAMES], classic: [...CLASSIC_TEMPLATES], ai: [...AI_SCENES] };
+const BUILTIN_EDITOR_CATALOG: EditorCatalog = {
+  photo: PHOTO_LAYOUTS.map((t) => ({ ...t, image: `/catalog/photo-4x6/${t.id}.jpg` })),
+  badge: BADGE_FRAMES.map((t) => ({ ...t, image: `/catalog/badge/${t.id}.jpg` })),
+  classic: [...CLASSIC_TEMPLATES],
+  ai: [...AI_SCENES]
+};
 
 // ─── permissions: locked parts are read-only (with a lock badge), hidden parts are not shown ──
 const LevelContext = createContext<(id: ConfigSectionId) => PermissionLevel>(() => 'edit');
 /** Sections that follow ค่ากลาง / an event: the label of that layer, or null when the kiosk sets them. */
 const InheritContext = createContext<(id: ConfigSectionId) => string | null>(() => null);
+/** Inherited sections: unlock one for this kiosk, or go to the page that sets it. */
+const InheritActions = createContext<{ own: (id: ConfigSectionId) => void; sourceHref: string | null; canFlip: (id: ConfigSectionId) => boolean } | null>(null);
 
 function InheritBadge({ label }: { label: string }) {
   return (
@@ -102,12 +111,26 @@ function LockBadge() {
 /** Wraps part of a section that belongs to another permission section. */
 function Gate({ id, children }: { id: ConfigSectionId; children: ReactNode }) {
   const level = useContext(LevelContext)(id);
+  const inherited = useContext(InheritContext)(id);
+  const actions = useContext(InheritActions);
   if (level === 'hidden') return null;
   if (level === 'edit') return <>{children}</>;
   return (
-    <fieldset disabled className="contents" aria-label="จัดการโดยผู้ให้บริการ">
-      {children}
-    </fieldset>
+    <>
+      {inherited ? (
+        <p className="flex flex-wrap items-center gap-2 text-xs text-ink-500 sm:col-span-2">
+          <InheritBadge label={inherited} />
+          {actions?.canFlip(id) ? (
+            <button type="button" onClick={() => actions.own(id)} className="rounded-full border border-primary-300 bg-surface px-2.5 py-0.5 font-medium text-primary-700 hover:bg-primary-50">
+              ตั้งเฉพาะตู้นี้
+            </button>
+          ) : null}
+        </p>
+      ) : null}
+      <fieldset disabled className="contents" aria-label={inherited ? `ตาม${inherited}` : 'จัดการโดยผู้ให้บริการ'}>
+        {children}
+      </fieldset>
+    </>
   );
 }
 
@@ -122,6 +145,7 @@ function setIn<T>(obj: T, path: string, value: unknown): T {
 function Section({ title, hint, icon, children, dim, perm }: { title: string; hint?: string; icon?: ReactNode; children: ReactNode; dim?: boolean; perm?: ConfigSectionId }) {
   const level = useContext(LevelContext)(perm ?? 'identity');
   const inherited = useContext(InheritContext)(perm ?? 'identity');
+  const actions = useContext(InheritActions);
   if (perm && level === 'hidden') return null;
   const locked = !!perm && level === 'view';
   return (
@@ -132,7 +156,23 @@ function Section({ title, hint, icon, children, dim, perm }: { title: string; hi
           <h2 className="text-lg leading-tight font-semibold text-ink-900">{title}</h2>
           {hint ? <p className="mt-0.5 text-sm text-ink-500">{hint}</p> : null}
         </div>
-        {perm && inherited ? <InheritBadge label={inherited} /> : locked ? <LockBadge /> : null}
+        {perm && inherited ? (
+          <span className="flex flex-wrap items-center justify-end gap-2">
+            <InheritBadge label={inherited} />
+            {actions?.canFlip(perm) ? (
+              <button type="button" onClick={() => actions.own(perm)} className="rounded-full border border-primary-300 bg-surface px-2.5 py-0.5 text-xs font-medium text-primary-700 hover:bg-primary-50">
+                ตั้งเฉพาะตู้นี้
+              </button>
+            ) : null}
+            {actions?.sourceHref ? (
+              <a href={actions.sourceHref} className="text-xs font-medium text-ink-600 underline hover:text-ink-900">
+                แก้ที่{inherited}
+              </a>
+            ) : null}
+          </span>
+        ) : locked ? (
+          <LockBadge />
+        ) : null}
       </header>
       <fieldset disabled={locked} className="grid gap-5 p-5 sm:grid-cols-2">
         {children}
@@ -369,6 +409,17 @@ export function ConfigEditor({
   return (
     <LevelContext.Provider value={levelOf}>
     <InheritContext.Provider value={inheritedOf}>
+    <InheritActions.Provider
+      value={
+        layered
+          ? {
+              own: (id) => toggleOwn(id, true),
+              canFlip: (id) => !ro && (isPlatform || permissions[id] === 'edit'),
+              sourceHref: source ? (source.id ? `/o/${orgSlug}/events/${source.id}` : `/o/${orgSlug}/events/defaults`) : null
+            }
+          : null
+      }
+    >
     <form
       onSubmit={(ev) => {
         ev.preventDefault();
@@ -395,7 +446,10 @@ export function ConfigEditor({
             </span>
             <div className="min-w-0 flex-1">
               <h2 className="text-lg leading-tight font-semibold text-ink-900">ที่มาของการตั้งค่า</h2>
-              <p className="mt-0.5 text-sm text-ink-500">หมวดที่ไม่ได้ตั้งเฉพาะตู้นี้ ใช้ค่าจากงานที่เลือก (หรือค่ากลาง) และเปลี่ยนตามเมื่อมีคนแก้งานนั้น</p>
+              <p className="mt-0.5 text-sm text-ink-500">
+                หมวดที่ไม่ได้ติ๊ก &quot;ตั้งเฉพาะตู้นี้&quot; ใช้ค่าของ{source?.label} (แก้ในหน้านี้ไม่ได้ จะเห็นป้าย &quot;ตาม{source?.label}&quot;) • จะแก้เฉพาะตู้นี้ กดปุ่ม &quot;ตั้งเฉพาะตู้นี้&quot; ที่หัวหมวด
+                หรือแก้ที่{source?.label}เพื่อให้ทุกตู้ที่ใช้ค่านั้นเปลี่ยนตาม
+              </p>
             </div>
           </header>
           <fieldset disabled={ro} className="flex flex-col gap-4 p-5">
@@ -599,7 +653,7 @@ export function ConfigEditor({
       ) : null}
 
       {show('photo', 'pickup') ? (
-        <Section title="กระดาษ" perm="paper" icon={<Ruler aria-hidden />} hint="ค่าเริ่มต้นของตู้ ช่างที่หน้างานปรับเองได้ (ตู้รายงานค่าที่ปรับไว้ใน &quot;ค่าฝั่งตู้&quot;) • การจัดวางบนแผ่น ขอบ และการชดเชยขนาดตั้งที่ตู้">
+        <Section title="กระดาษ" perm="paper" icon={<Ruler aria-hidden />} hint="ค่าเริ่มต้นของตู้ ช่างที่หน้างานปรับเองได้ (ตู้รายงานค่าที่ปรับไว้ใน &quot;ค่าฝั่งตู้&quot;) • ขอบและการชดเชยขนาดของเครื่องพิมพ์ตั้งที่ตู้">
           <Choice
             label="กระดาษของเครื่องพิมพ์ภาพ"
             value={s.paper.photo}
@@ -621,6 +675,29 @@ export function ConfigEditor({
             ]}
             onChange={set('paper.badge')}
             disabled={ro}
+          />
+          {s.paper.photo === 'a4' || s.paper.photo === 'a5' ? (
+            <SheetLayoutEditor
+              key={s.paper.photo}
+              sheet={s.paper.photo}
+              value={s.paper[s.paper.photo === 'a5' ? 'a5Layout' : 'a4Layout']}
+              onChange={set(`paper.${s.paper.photo}Layout`)}
+              badgeCut={(BADGE_SIZES.find((b) => b.id === s.badge.size) ?? BADGE_SIZES[3]).cut}
+              disabled={ro || levelOf('paper') !== 'edit'}
+            />
+          ) : null}
+        </Section>
+      ) : null}
+
+      {show('photo') ? (
+        <Section title="ข้อความตกแต่ง" perm="decor" icon={<Type aria-hidden />} hint="ข้อความของร้านบนกรอบภาพ 4x6 และเข็มกลัด ตู้วาดทับบนกรอบตอนพิมพ์ • ชื่องาน วันที่ ชื่อร้าน ดึงจากแบรนด์และธีมงาน">
+          <DecorTextEditor
+            value={s.decor}
+            onChange={set('decor')}
+            photo={catalog.photo}
+            badge={catalog.badge}
+            values={{ 'event.title': s.event.title, 'event.subtitle': s.event.subtitle, 'event.date': s.event.date || new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase(), 'brand.brandName': s.brand.brandName }}
+            disabled={ro || levelOf('decor') !== 'edit'}
           />
         </Section>
       ) : null}
@@ -735,6 +812,7 @@ export function ConfigEditor({
         </div>
       ) : null}
     </form>
+    </InheritActions.Provider>
     </InheritContext.Provider>
     </LevelContext.Provider>
   );

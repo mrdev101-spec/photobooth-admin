@@ -6,6 +6,11 @@ import { orgContextForPlatform, requirePlatform } from '@/server/auth/context';
 import { LimitsInput, updateLimits } from '@/server/services/organizations';
 import { DisableInput, KioskInput, createKiosk, setKioskEnabled, unpairKiosk } from '@/server/services/kiosks';
 import { MemberInput, addMember, removeMember, resetMemberPassword } from '@/server/services/members';
+import { MoveKioskInput, moveKiosk } from '@/server/services/kiosk-stock';
+import { stockOrg } from '@/server/services/organizations';
+import { db } from '@/server/db/client';
+import { branches } from '@/server/db/schema';
+import { eq } from 'drizzle-orm';
 import { CONFIG_SECTIONS } from '@/lib/config-permissions';
 import { formObject, runAction, type ActionState } from '@/server/lib/action';
 
@@ -16,7 +21,7 @@ const path = (orgId: string, tab = '') => `/platform/organizations/${orgId}${tab
 export async function updateLimitsAction(orgId: string, _: ActionState, form: FormData): Promise<ActionState> {
   return runAction(async () => {
     const ctx = await requirePlatform('platform.org.manage');
-    const raw = formObject(form, { booleans: ['customerCanAddKiosks'] });
+    const raw = formObject(form, { booleans: ['customerCanAddKiosks', 'ownStripeAllowed'] });
     const configPermissions: Record<string, string> = {};
     for (const s of CONFIG_SECTIONS) configPermissions[s.id] = String(form.get(`perm.${s.id}`) ?? 'edit');
     await updateLimits(ctx, orgId, LimitsInput.parse({ ...raw, configPermissions }));
@@ -64,7 +69,34 @@ export async function unpairKioskPlatformAction(orgId: string, kioskId: string, 
     const ctx = await orgContextForPlatform(platform, orgId);
     await unpairKiosk(ctx, kioskId);
     revalidatePath(path(orgId), 'layout');
-    return { ok: true, message: 'ยกเลิกการเชื่อมต่อแล้ว' };
+    return { ok: true, message: 'รีเซ็ตและล็อกตู้แล้ว ตู้จะล็อกตัวเองภายใน 1 นาที (หรือทันทีที่ออนไลน์) จนกว่าจะใส่ Key ใหม่' };
+  });
+}
+
+/** Stock → this customer (the kiosk must not be registered), then straight to issuing its key. */
+export async function addFromStockAction(orgId: string, _: ActionState, form: FormData): Promise<ActionState> {
+  let kioskRowId = '';
+  const result = await runAction(async () => {
+    const platform = await requirePlatform('platform.org.manage');
+    const input = MoveKioskInput.parse(formObject(form));
+    await moveKiosk(platform, orgId, input);
+    kioskRowId = input.kioskRowId;
+    revalidatePath('/platform', 'layout');
+    return { ok: true };
+  });
+  if (result.ok) redirect(`${path(orgId, '/kiosks')}?pair=${kioskRowId}&new=1`);
+  return result;
+}
+
+/** This customer → stock (a locked or never-registered kiosk). */
+export async function returnToStockAction(orgId: string, kioskRowId: string, _: ActionState): Promise<ActionState> {
+  return runAction(async () => {
+    const platform = await requirePlatform('platform.org.manage');
+    const stock = await stockOrg();
+    const branch = (await db().select({ id: branches.id }).from(branches).where(eq(branches.orgId, stock.id)).limit(1))[0];
+    await moveKiosk(platform, stock.id, { kioskRowId, branchId: branch!.id });
+    revalidatePath('/platform', 'layout');
+    return { ok: true, message: 'คืนตู้เข้าคลังแล้ว' };
   });
 }
 

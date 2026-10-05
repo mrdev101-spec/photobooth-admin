@@ -15,6 +15,9 @@ import { AppError, forbidden, isDuplicateKey, notFound } from '@/server/lib/erro
 import { isFull } from '@/lib/quota';
 
 export const PAIR_CODE_TTL_MS = 15 * 60_000;
+/** Activation keys from the platform: given to a technician or a customer, so they last longer. */
+export const KEY_TTL_MS = 30 * 86_400_000;
+export const KEY_LENGTH = 12;
 
 export const KioskInput = z.object({
   name: z.string().trim().min(1, 'กรอกชื่อตู้').max(100),
@@ -38,8 +41,8 @@ function assertFleet(ctx: OrgContext) {
   if (!canManageFleet(ctx)) throw new AppError('การเพิ่ม จับคู่ หรือยกเลิกการเชื่อมต่อตู้ ทำโดยผู้ให้บริการ กรุณาติดต่อผู้ให้บริการ', 'forbidden');
 }
 
-/** XXXX-XXXX for display; the kiosk accepts it with or without the dash. */
-export const formatPairCode = (code: string) => `${code.slice(0, 4)}-${code.slice(4)}`;
+/** XXXX-XXXX (pairing code) or XXXX-XXXX-XXXX (key) for display; the kiosk accepts it with or without dashes. */
+export const formatPairCode = (code: string) => code.match(/.{1,4}/g)!.join('-');
 
 export async function listKiosks(ctx: OrgContext, filter: { branchId?: string; includeRevoked?: boolean } = {}) {
   assertCan(ctx, 'kiosk.view');
@@ -123,31 +126,34 @@ export async function updateKiosk(ctx: OrgContext, id: string, input: z.infer<ty
 }
 
 /**
- * New pairing code for a kiosk that is waiting to pair (or was unpaired). Earlier unused
- * codes for the kiosk stop working. Returns the code in clear once; only its hash is stored.
+ * New pairing code (8 characters, 15 minutes) or activation key (12 characters, 30 days,
+ * platform only) for a kiosk that is waiting to register (or was reset). Either is good for one
+ * machine, once; earlier unused codes for the kiosk stop working. Returned in clear once; only
+ * its hash is stored.
  */
-export async function createPairCode(ctx: OrgContext, id: string): Promise<{ code: string; expiresAt: Date }> {
+export async function createPairCode(ctx: OrgContext, id: string, kind: 'pair' | 'key' = 'pair'): Promise<{ code: string; expiresAt: Date }> {
   const kiosk = await getForManage(ctx, id);
   assertFleet(ctx);
+  if (kind === 'key' && !ctx.principal.platformRole) throw forbidden();
   if (kiosk.status === 'active' || kiosk.status === 'disabled') throw new AppError('ตู้นี้เชื่อมต่ออยู่แล้ว ยกเลิกการเชื่อมต่อก่อนถ้าต้องการจับคู่ใหม่');
   if (kiosk.status === 'revoked' && isFull(await usedQuota(ctx), ctx.org.kioskQuota)) {
     throw new AppError(`บัญชีนี้มีตู้ครบ ${ctx.org.kioskQuota} เครื่องตามโควตาแล้ว`, 'conflict');
   }
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + PAIR_CODE_TTL_MS);
+  const expiresAt = new Date(now.getTime() + (kind === 'key' ? KEY_TTL_MS : PAIR_CODE_TTL_MS));
 
   for (let attempt = 0; attempt < 3; attempt++) {
-    const code = randomCode(PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH);
+    const code = randomCode(PAIR_CODE_ALPHABET, kind === 'key' ? KEY_LENGTH : PAIR_CODE_LENGTH);
     try {
       await db().transaction(async (tx) => {
         await tx
           .update(kioskPairCodes)
           .set({ expiresAt: now })
           .where(and(eq(kioskPairCodes.kioskRowId, id), isNull(kioskPairCodes.usedAt), gt(kioskPairCodes.expiresAt, now)));
-        await tx.insert(kioskPairCodes).values({ id: newId('kpc'), orgId: ctx.org.id, kioskRowId: id, codeHash: sha256Hex(code), expiresAt, createdBy: ctx.user.id });
+        await tx.insert(kioskPairCodes).values({ id: newId('kpc'), orgId: ctx.org.id, kioskRowId: id, codeHash: sha256Hex(code), kind, expiresAt, createdBy: ctx.user.id });
         if (kiosk.status === 'revoked') await tx.update(kiosks).set({ status: 'pending' }).where(eq(kiosks.id, id));
       });
-      await audit(actor(ctx), { action: 'kiosk.pair_code', resourceType: 'kiosk', resourceId: id });
+      await audit(actor(ctx), { action: kind === 'key' ? 'kiosk.key' : 'kiosk.pair_code', resourceType: 'kiosk', resourceId: id });
       return { code: formatPairCode(code), expiresAt };
     } catch (err) {
       if (!isDuplicateKey(err)) throw err; // astronomically rare collision: draw again
@@ -161,7 +167,10 @@ export async function kioskPairState(ctx: OrgContext, id: string) {
   return { status: kiosk.status, kioskId: kiosk.kioskId };
 }
 
-/** Unpair: the device token stops working and the machine can be paired again later. */
+/**
+ * Reset and lock: the device token stops working; the kiosk app clears what it got from the
+ * Admin and locks itself until a new key is entered (installed kiosks).
+ */
 export async function unpairKiosk(ctx: OrgContext, id: string) {
   const kiosk = await getForManage(ctx, id);
   assertFleet(ctx);
@@ -172,7 +181,17 @@ export async function unpairKiosk(ctx: OrgContext, id: string) {
     await tx.update(kioskPairCodes).set({ expiresAt: now }).where(and(eq(kioskPairCodes.kioskRowId, id), isNull(kioskPairCodes.usedAt)));
     await tx
       .update(kiosks)
-      .set({ status: 'revoked', kioskId: null, formerKioskId: kiosk.kioskId ?? kiosk.formerKioskId, revokedAt: now, fingerprintMismatch: false })
+      .set({
+        status: 'revoked',
+        kioskId: null,
+        formerKioskId: kiosk.kioskId ?? kiosk.formerKioskId,
+        revokedAt: now,
+        fingerprintMismatch: false,
+        appliedRevision: null,
+        manifestRevision: null,
+        emergency: null,
+        maintenance: false
+      })
       .where(eq(kiosks.id, id));
   });
   await audit(actor(ctx), { action: 'kiosk.unpair', resourceType: 'kiosk', resourceId: id, before: { kioskId: kiosk.kioskId, status: kiosk.status } });
@@ -215,15 +234,15 @@ export async function deletePendingKiosk(ctx: OrgContext, id: string) {
   await audit(actor(ctx), { action: 'kiosk.delete', resourceType: 'kiosk', resourceId: id, before: { name: kiosk.name } });
 }
 
-/** Every kiosk on the platform, for the platform console. */
+/** Every kiosk on the platform (stock included, reset / locked ones too), for the platform console. */
 export async function listAllKiosks(filter: { orgId?: string } = {}) {
   return db()
-    .select({ kiosk: kiosks, orgId: organizations.id, orgName: organizations.name, orgSlug: organizations.slug, branchName: branches.name })
+    .select({ kiosk: kiosks, orgId: organizations.id, orgName: organizations.name, orgSlug: organizations.slug, orgKind: organizations.kind, orgStatus: organizations.status, branchName: branches.name })
     .from(kiosks)
     .innerJoin(organizations, eq(organizations.id, kiosks.orgId))
     .leftJoin(branches, eq(branches.id, kiosks.branchId))
-    .where(and(inArray(kiosks.status, [...LIVE_STATUSES]), filter.orgId ? eq(kiosks.orgId, filter.orgId) : undefined))
-    .orderBy(organizations.name, kiosks.name);
+    .where(and(isNull(organizations.deletedAt), filter.orgId ? eq(kiosks.orgId, filter.orgId) : undefined))
+    .orderBy(organizations.kind, organizations.name, kiosks.name);
 }
 
 export const DisableInput = z.object({ reason: z.string().trim().min(1, 'ระบุเหตุผล (ลูกค้าเห็นข้อความนี้)').max(255) });

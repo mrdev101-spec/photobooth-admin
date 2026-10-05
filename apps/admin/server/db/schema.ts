@@ -12,7 +12,7 @@ import {
   uniqueIndex,
   varchar
 } from 'drizzle-orm/mysql-core';
-import { jsonText } from './json-text';
+import { jsonText, mediumBlob } from './json-text';
 import type { TemplateFiles, TemplateSpec } from '@photobooth/contracts';
 
 /**
@@ -31,7 +31,7 @@ const updatedAt = () =>
     .default(sql`CURRENT_TIMESTAMP(3)`)
     .$onUpdate(() => new Date());
 
-export const ORG_ROLES = ['owner', 'manager', 'designer', 'pickup_staff', 'viewer'] as const;
+export const ORG_ROLES = ['owner', 'manager', 'designer', 'pickup_staff', 'event_staff', 'viewer'] as const;
 export type OrgRole = (typeof ORG_ROLES)[number];
 export const PLATFORM_ROLES = ['platform_admin', 'platform_support'] as const;
 export type PlatformRole = (typeof PLATFORM_ROLES)[number];
@@ -43,14 +43,20 @@ export const organizations = mysqlTable(
     slug: varchar('slug', { length: 64 }).notNull(),
     name: varchar('name', { length: 200 }).notNull(),
     status: mysqlEnum('status', ['active', 'suspended']).notNull().default('active'),
+    /** 'stock' = the platform's own kiosk stock (คลังตู้): kiosks not given to a customer yet. Never listed as a customer. */
+    kind: mysqlEnum('kind', ['customer', 'stock']).notNull().default('customer'),
     kioskQuota: int('kiosk_quota').default(5), // NULL = unlimited
     userQuota: int('user_quota').default(3), // customer members; NULL = unlimited (decision D14)
     aiMonthlyQuota: int('ai_monthly_quota'), // images per month; NULL = unlimited
+    /** Templates the customer may upload itself (drafts + published); 0 = off, NULL = unlimited. */
+    templateQuota: int('template_quota').default(0),
     /** Customers may add / pair / unpair kiosks themselves (decision D12: off, the platform does it). */
     customerCanAddKiosks: boolean('customer_can_add_kiosks').notNull().default(false),
     /** Per-section kiosk settings permissions (lib/config-permissions.ts); NULL = defaults. */
     configPermissions: jsonText<Record<string, string>>('config_permissions'),
     livePaymentsAllowed: boolean('live_payments_allowed').notNull().default(false),
+    /** The platform lets this customer take payments into its own Stripe account (set up by the owner). */
+    ownStripeAllowed: boolean('own_stripe_allowed').notNull().default(false),
     timezone: varchar('timezone', { length: 64 }).notNull().default('Asia/Bangkok'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -226,6 +232,8 @@ export const kioskPairCodes = mysqlTable(
     orgId: id('org_id').notNull(),
     kioskRowId: id('kiosk_row_id').notNull(),
     codeHash: char('code_hash', { length: 64 }).notNull(),
+    /** 'pair' = 8-character code for 15 minutes; 'key' = 12-character activation key from the platform (30 days). */
+    kind: mysqlEnum('kind', ['pair', 'key']).notNull().default('pair'),
     expiresAt: datetime('expires_at', { mode: 'date', fsp: 3 }).notNull(),
     usedAt: datetime('used_at', { mode: 'date', fsp: 3 }),
     createdBy: id('created_by'),
@@ -377,7 +385,13 @@ export const orders = mysqlTable(
     claimedBy: id('claimed_by'),
     claimedStation: varchar('claimed_station', { length: 60 }),
     handedOverAt: datetime('handed_over_at', { mode: 'date', fsp: 3 }),
-    reprintAllowance: int('reprint_allowance').notNull().default(0)
+    reprintAllowance: int('reprint_allowance').notNull().default(0),
+    /** Queue number printed on the slip and the sheet (A001 …), per kiosk per day. */
+    queueNo: varchar('queue_no', { length: 16 }),
+    /** The settings preset (งาน) the kiosk followed when the order came in. */
+    eventId: id('event_id'),
+    /** A small JPEG of the order exists in order_thumbs (Event Console). */
+    hasThumb: boolean('has_thumb').notNull().default(false)
   },
   (t) => [
     uniqueIndex('orders_code_uq').on(t.code), // NULL for kiosk-printed orders; MariaDB allows many NULLs
@@ -386,6 +400,62 @@ export const orders = mysqlTable(
     index('orders_org_status_idx').on(t.orgId, t.status, t.orderedAt)
   ]
 );
+
+/**
+ * What the kiosk printed for an order, job by job (photo sheet, badge sheet, queue slip), as the
+ * kiosk reports it (Event Console). One row per kiosk job id; the latest status wins.
+ */
+export const PRINT_JOB_STATUSES = ['queued', 'printing', 'printed', 'failed', 'cancelled'] as const;
+export const printJobs = mysqlTable(
+  'print_jobs',
+  {
+    id: id().primaryKey(),
+    orgId: id('org_id').notNull(),
+    kioskRowId: id('kiosk_row_id').notNull(),
+    orderId: id('order_id').notNull(),
+    clientJobId: varchar('client_job_id', { length: 64 }).notNull(),
+    kind: mysqlEnum('kind', ['photo', 'badge', 'slip']).notNull(),
+    status: mysqlEnum('status', PRINT_JOB_STATUSES).notNull(),
+    printer: varchar('printer', { length: 200 }),
+    error: varchar('error', { length: 500 }),
+    attempts: int('attempts').notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+    printedAt: datetime('printed_at', { mode: 'date', fsp: 3 })
+  },
+  (t) => [uniqueIndex('print_jobs_client_uq').on(t.kioskRowId, t.clientJobId), index('print_jobs_org_time_idx').on(t.orgId, t.createdAt), index('print_jobs_order_idx').on(t.orderId)]
+);
+
+/**
+ * Commands for one kiosk (Event Console: reprint an order, cancel what is still waiting in the
+ * printer queue). Delivered through GET /kiosk/wait within a second or two; the kiosk reports
+ * the result. Pending commands the kiosk never picks up expire.
+ */
+export const kioskCommands = mysqlTable(
+  'kiosk_commands',
+  {
+    id: id().primaryKey(),
+    orgId: id('org_id').notNull(),
+    kioskRowId: id('kiosk_row_id').notNull(),
+    type: mysqlEnum('type', ['reprint', 'cancel_print']).notNull(),
+    payload: jsonText<Record<string, unknown>>('payload').notNull(),
+    status: mysqlEnum('status', ['pending', 'sent', 'done', 'failed']).notNull().default('pending'),
+    message: varchar('message', { length: 500 }),
+    createdBy: id('created_by'),
+    createdAt: createdAt(),
+    sentAt: datetime('sent_at', { mode: 'date', fsp: 3 }),
+    doneAt: datetime('done_at', { mode: 'date', fsp: 3 })
+  },
+  (t) => [index('kiosk_commands_kiosk_idx').on(t.kioskRowId, t.status), index('kiosk_commands_org_idx').on(t.orgId, t.createdAt)]
+);
+
+/** Small JPEG of each order for the Event Console (customer photos: served only to the shop). */
+export const orderThumbs = mysqlTable('order_thumbs', {
+  orderId: id('order_id').primaryKey(),
+  orgId: id('org_id').notNull(),
+  jpeg: mediumBlob('jpeg').notNull(),
+  createdAt: createdAt()
+});
 
 export const orderFiles = mysqlTable(
   'order_files',
@@ -417,6 +487,8 @@ export const catalogTemplates = mysqlTable(
     source: mysqlEnum('source', ['builtin', 'uploaded']).notNull().default('builtin'),
     /** draft = uploaded but never published (kiosks and customers do not see it). */
     status: mysqlEnum('status', ['draft', 'published', 'retired']).notNull().default('published'),
+    /** Uploaded by a customer for its own kiosks only; NULL = the platform's (every customer). */
+    orgId: id('org_id'),
     /** Uploaded templates only (built-in names come from the kiosk catalog). */
     name: varchar('name', { length: 80 }),
     description: varchar('description', { length: 300 }),
@@ -468,6 +540,190 @@ export const catalogState = mysqlTable('catalog_state', {
   updatedAt: updatedAt()
 });
 
+// ─── AI through the Admin (docs §8.5) ────────────────────────────────────────
+
+export const AI_PROVIDER_SETTINGS = ['auto', 'openai', 'openrouter', 'google'] as const;
+
+/**
+ * Single row (id = 1): the platform's AI account. One key per provider for every customer;
+ * keys are encrypted (MASTER_KEY) and never leave the Admin, kiosks send photos here instead.
+ */
+export const platformAiSettings = mysqlTable('platform_ai_settings', {
+  id: int('id').primaryKey(),
+  provider: mysqlEnum('provider', AI_PROVIDER_SETTINGS).notNull().default('auto'),
+  openaiKeyEnc: text('openai_key_enc'),
+  openrouterKeyEnc: text('openrouter_key_enc'),
+  googleKeyEnc: text('google_key_enc'),
+  openaiKeyHint: varchar('openai_key_hint', { length: 16 }).notNull().default(''),
+  openrouterKeyHint: varchar('openrouter_key_hint', { length: 16 }).notNull().default(''),
+  googleKeyHint: varchar('google_key_hint', { length: 16 }).notNull().default(''),
+  openaiModel: varchar('openai_model', { length: 80 }),
+  openrouterModel: varchar('openrouter_model', { length: 80 }),
+  googleModel: varchar('google_model', { length: 80 }),
+  thaiTextModel: varchar('thai_text_model', { length: 80 }),
+  imageSize: mysqlEnum('image_size', ['1K', '2K']).notNull().default('1K'),
+  faceRefine: boolean('face_refine').notNull().default(true),
+  lastTestAt: datetime('last_test_at', { mode: 'date', fsp: 3 }),
+  lastTestOk: boolean('last_test_ok'),
+  lastTestMessage: varchar('last_test_message', { length: 500 }),
+  updatedBy: id('updated_by'),
+  updatedAt: updatedAt()
+});
+
+export const AI_JOB_STATUSES = ['queued', 'running', 'succeeded', 'failed'] as const;
+
+/** One customer image request from a kiosk. Rows are kept (no images) for usage and support. */
+export const aiJobs = mysqlTable(
+  'ai_jobs',
+  {
+    id: id().primaryKey(),
+    orgId: id('org_id').notNull(),
+    kioskRowId: id('kiosk_row_id').notNull(),
+    /** The kiosk's id for this request: a retried POST returns the same job. */
+    requestId: varchar('request_id', { length: 64 }).notNull(),
+    sceneId: varchar('scene_id', { length: 64 }).notNull(),
+    /** The payment this image used (null = the kiosk does not charge: free use / simulated). */
+    paymentId: id('payment_id'),
+    status: mysqlEnum('status', AI_JOB_STATUSES).notNull().default('queued'),
+    provider: varchar('provider', { length: 20 }),
+    model: varchar('model', { length: 80 }),
+    imageSize: varchar('image_size', { length: 4 }),
+    refined: boolean('refined').notNull().default(false),
+    errorCode: varchar('error_code', { length: 16 }),
+    errorDetail: varchar('error_detail', { length: 500 }),
+    durationMs: int('duration_ms'),
+    /** Calendar month of the request (Asia/Bangkok), the quota period it counts in. */
+    month: char('month', { length: 7 }).notNull(),
+    createdAt: createdAt(),
+    startedAt: datetime('started_at', { mode: 'date', fsp: 3 }),
+    finishedAt: datetime('finished_at', { mode: 'date', fsp: 3 })
+  },
+  (t) => [
+    uniqueIndex('ai_jobs_request_uq').on(t.kioskRowId, t.requestId),
+    index('ai_jobs_org_month_idx').on(t.orgId, t.month, t.status),
+    index('ai_jobs_status_idx').on(t.status, t.createdAt)
+  ]
+);
+
+/** The images of a job while it runs: the customer photo goes when the job ends, the result after 1 hour. */
+export const aiJobFiles = mysqlTable(
+  'ai_job_files',
+  {
+    jobId: id('job_id').notNull(),
+    role: mysqlEnum('role', ['photo', 'crop', 'result']).notNull(),
+    mimeType: varchar('mime_type', { length: 20 }).notNull(),
+    bytes: mediumBlob('bytes').notNull(),
+    createdAt: createdAt()
+  },
+  (t) => [primaryKey({ columns: [t.jobId, t.role] })]
+);
+
+/** Images customers received per customer per month (the quota counter). */
+export const aiUsageMonthly = mysqlTable(
+  'ai_usage_monthly',
+  {
+    orgId: id('org_id').notNull(),
+    month: char('month', { length: 7 }).notNull(),
+    images: int('images').notNull().default(0),
+    failed: int('failed').notNull().default(0),
+    updatedAt: updatedAt()
+  },
+  (t) => [primaryKey({ columns: [t.orgId, t.month] })]
+);
+
+// ─── Payments through the Admin (docs §8.4) ──────────────────────────────────
+
+/**
+ * Single row (id = 1): the company's Stripe account, used for every customer that has no
+ * account of its own. Keys are encrypted (MASTER_KEY) and never reach kiosks.
+ */
+export const platformPaymentSettings = mysqlTable('platform_payment_settings', {
+  id: int('id').primaryKey(),
+  testSecretEnc: text('test_secret_enc'),
+  testWebhookEnc: text('test_webhook_enc'),
+  liveSecretEnc: text('live_secret_enc'),
+  liveWebhookEnc: text('live_webhook_enc'),
+  testSecretHint: varchar('test_secret_hint', { length: 16 }).notNull().default(''),
+  liveSecretHint: varchar('live_secret_hint', { length: 16 }).notNull().default(''),
+  /** Stripe needs a payer email for PromptPay; the company's is used. */
+  email: varchar('email', { length: 200 }).notNull().default(''),
+  lastTestAt: datetime('last_test_at', { mode: 'date', fsp: 3 }),
+  lastTestOk: boolean('last_test_ok'),
+  lastTestMessage: varchar('last_test_message', { length: 500 }),
+  lastWebhookAt: datetime('last_webhook_at', { mode: 'date', fsp: 3 }),
+  updatedBy: id('updated_by'),
+  updatedAt: updatedAt()
+});
+
+/**
+ * A customer's own Stripe account (only when the platform allows it). `keys` = the owner
+ * entered its keys; `connect` = linked with Stripe Connect (account id, no keys stored).
+ */
+export const orgPaymentAccounts = mysqlTable('org_payment_accounts', {
+  orgId: id('org_id').primaryKey(),
+  /** Off = the customer is back on the company account (keys are kept). */
+  active: boolean('active').notNull().default(false),
+  method: mysqlEnum('method', ['keys', 'connect']).notNull().default('keys'),
+  testSecretEnc: text('test_secret_enc'),
+  testWebhookEnc: text('test_webhook_enc'),
+  liveSecretEnc: text('live_secret_enc'),
+  liveWebhookEnc: text('live_webhook_enc'),
+  testSecretHint: varchar('test_secret_hint', { length: 16 }).notNull().default(''),
+  liveSecretHint: varchar('live_secret_hint', { length: 16 }).notNull().default(''),
+  connectAccountId: varchar('connect_account_id', { length: 64 }),
+  email: varchar('email', { length: 200 }).notNull().default(''),
+  accountName: varchar('account_name', { length: 120 }),
+  lastTestAt: datetime('last_test_at', { mode: 'date', fsp: 3 }),
+  lastTestOk: boolean('last_test_ok'),
+  lastTestMessage: varchar('last_test_message', { length: 500 }),
+  lastWebhookAt: datetime('last_webhook_at', { mode: 'date', fsp: 3 }),
+  updatedBy: id('updated_by'),
+  updatedAt: updatedAt()
+});
+
+export const PAYMENT_STATUSES = ['requires_action', 'processing', 'succeeded', 'canceled', 'failed'] as const;
+
+/** One PromptPay payment from a kiosk. `account` says whose Stripe account received the money. */
+export const payments = mysqlTable(
+  'payments',
+  {
+    id: id().primaryKey(),
+    orgId: id('org_id').notNull(),
+    kioskRowId: id('kiosk_row_id').notNull(),
+    branchId: id('branch_id'),
+    account: mysqlEnum('account', ['platform', 'shop']).notNull(),
+    mode: mysqlEnum('mode', ['test', 'live']).notNull(),
+    stripeIntentId: varchar('stripe_intent_id', { length: 64 }).notNull(),
+    /** Stripe Connect account the payment was made on (null = keys of the company / the shop). */
+    stripeAccountId: varchar('stripe_account_id', { length: 64 }),
+    amount: int('amount').notNull(), // THB
+    product: varchar('product', { length: 100 }).notNull().default(''),
+    description: varchar('description', { length: 200 }).notNull().default(''),
+    status: mysqlEnum('status', PAYMENT_STATUSES).notNull().default('requires_action'),
+    confirmedBy: mysqlEnum('confirmed_by', ['webhook', 'poll']),
+    /** Stripe's fee and the net amount in satang, from the balance transaction (when known). */
+    feeSatang: int('fee_satang'),
+    netSatang: int('net_satang'),
+    /** What used this payment (one AI image, …): a payment pays for one thing only. */
+    usedBy: varchar('used_by', { length: 40 }),
+    expiresAt: datetime('expires_at', { mode: 'date', fsp: 3 }).notNull(),
+    paidAt: datetime('paid_at', { mode: 'date', fsp: 3 }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt()
+  },
+  (t) => [
+    uniqueIndex('payments_intent_uq').on(t.stripeIntentId),
+    uniqueIndex('payments_used_by_uq').on(t.usedBy),
+    index('payments_org_idx').on(t.orgId, t.createdAt),
+    index('payments_status_idx').on(t.status, t.expiresAt)
+  ]
+);
+
+export type Payment = typeof payments.$inferSelect;
+export type OrgPaymentAccount = typeof orgPaymentAccounts.$inferSelect;
+export type PlatformPaymentSettings = typeof platformPaymentSettings.$inferSelect;
+export type AiJob = typeof aiJobs.$inferSelect;
+export type PlatformAiSettings = typeof platformAiSettings.$inferSelect;
 export type TemplateVersion = typeof templateVersions.$inferSelect;
 export type CatalogTemplate = typeof catalogTemplates.$inferSelect;
 export type Order = typeof orders.$inferSelect;

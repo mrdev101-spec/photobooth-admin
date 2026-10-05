@@ -81,17 +81,36 @@ export const CLASSIC_TEMPLATES = [
 export type ClassicTemplateId = (typeof CLASSIC_TEMPLATES)[number]['id'];
 
 /** AI scenes are platform-managed only (customers can switch them on/off, not edit them). */
+export const AI_SCENE_CATEGORIES = [
+  { id: 'movie', name: 'ภาพยนตร์' },
+  { id: 'festival', name: 'เทศกาล' },
+  { id: 'thailand', name: 'ท่องเที่ยวไทย' }
+] as const;
+
+/** AI scenes are platform-managed only (customers can switch them on/off, not edit them). Same ids as the kiosk (aiTemplateData.js). */
 export const AI_SCENES = [
-  { id: 'neon-city', name: 'Neon Dreams', desc: 'เมืองนีออนยามค่ำคืนกลางสายฝน แจ็กเก็ตเทคแวร์เรืองแสง' },
-  { id: 'astronaut', name: 'Beyond the Stars', desc: 'ชุดนักบินอวกาศ โลกและแสงอาทิตย์จากวงโคจร' },
-  { id: 'hollywood', name: 'Born to Shine', desc: 'ม่านกำมะหยี่แดง สปอตไลต์สีทอง ชุดราตรีและทักซิโด้' },
-  { id: 'rockstar', name: 'Louder Than Life', desc: 'เวทีคอนเสิร์ตยักษ์ ไฟสปอตไลต์ กีตาร์ไฟฟ้า' },
-  { id: 'superhero', name: 'Rise of a Hero', desc: 'ชุดฮีโร่เกราะน้ำเงิน-ทองพร้อมผ้าคลุม เหนือเมืองยามเย็น' },
-  { id: 'seoul-romance', name: 'Spring in Seoul', desc: 'ถนนซากุระบานสะพรั่ง แสงพาสเทลนุ่มละมุน' },
-  { id: 'noir', name: 'Midnight Case', desc: 'ขาวดำคอนทราสต์จัด โค้ทยาวกับหมวกเฟดอร่า ตัวอักษรสีแดง' },
-  { id: 'fantasy', name: 'The Last Kingdom', desc: 'ชุดเกราะราชวงศ์ ผ้าคลุมแดง ปราสาทและมังกรยามอาทิตย์ตก' },
-  { id: 'racing', name: 'Full Throttle', desc: 'ชุดนักแข่งขาว-แดง สนามแข่งกลางคืนและแสงไฟพุ่ง' },
-  { id: 'lost-temple', name: 'Lost Temple', desc: 'ซากวิหารโบราณกลางป่าดิบ แสงลอดม่านหมอก' }
+  { id: 'neon-city', name: 'Neon Dreams', desc: 'เมืองนีออนยามค่ำคืนกลางสายฝน แจ็กเก็ตเทคแวร์เรืองแสง', category: 'movie' },
+  { id: 'astronaut', name: 'Beyond the Stars', desc: 'ชุดนักบินอวกาศ โลกและแสงอาทิตย์จากวงโคจร', category: 'movie' },
+  { id: 'hollywood', name: 'Born to Shine', desc: 'ม่านกำมะหยี่แดง สปอตไลต์สีทอง ชุดราตรีและทักซิโด้', category: 'movie' },
+  { id: 'rockstar', name: 'Louder Than Life', desc: 'เวทีคอนเสิร์ตยักษ์ ไฟสปอตไลต์ กีตาร์ไฟฟ้า', category: 'movie' },
+  { id: 'superhero', name: 'Rise of a Hero', desc: 'ชุดฮีโร่เกราะน้ำเงิน-ทองพร้อมผ้าคลุม เหนือเมืองยามเย็น', category: 'movie' },
+  { id: 'seoul-romance', name: 'Spring in Seoul', desc: 'ถนนซากุระบานสะพรั่ง แสงพาสเทลนุ่มละมุน', category: 'movie' },
+  { id: 'noir', name: 'Midnight Case', desc: 'ขาวดำคอนทราสต์จัด โค้ทยาวกับหมวกเฟดอร่า ตัวอักษรสีแดง', category: 'movie' },
+  { id: 'fantasy', name: 'The Last Kingdom', desc: 'ชุดเกราะราชวงศ์ ผ้าคลุมแดง ปราสาทและมังกรยามอาทิตย์ตก', category: 'movie' },
+  { id: 'racing', name: 'Full Throttle', desc: 'ชุดนักแข่งขาว-แดง สนามแข่งกลางคืนและแสงไฟพุ่ง', category: 'movie' },
+  { id: 'lost-temple', name: 'Lost Temple', desc: 'ซากวิหารโบราณกลางป่าดิบ แสงลอดม่านหมอก', category: 'movie' },
+  { id: 'songkran', name: 'Songkran Festival', desc: 'ถนนสงกรานต์ สาดน้ำ ละอองน้ำระยิบระยับ เสื้อลายดอกและพวงมาลัย', category: 'festival' },
+  { id: 'loy-krathong', name: 'Loy Krathong', desc: 'คืนเพ็ญริมแม่น้ำ กระทงใบตองแสงเทียน ชุดไทย', category: 'festival' },
+  { id: 'yi-peng', name: 'Yi Peng · Chiang Mai', desc: 'โคมลอยนับร้อยบนฟ้ายามค่ำ เชียงใหม่ ชุดล้านนา', category: 'festival' },
+  { id: 'chinese-new-year', name: 'Chinese New Year', desc: 'โคมแดงเรียงราย ถนนเยาวราช ชุดกี่เพ้าและชุดจีนสีแดงทอง', category: 'festival' },
+  { id: 'wat-arun', name: 'Wat Arun · Bangkok', desc: 'ริมแม่น้ำเจ้าพระยา ยอดพระปรางค์วัดอรุณยามพระอาทิตย์ตก', category: 'thailand' },
+  { id: 'phi-phi', name: 'Phi Phi Islands', desc: 'หาดทรายขาว น้ำทะเลสีเทอร์ควอยซ์ หน้าผาหินปูน เรือหางยาว', category: 'thailand' },
+  { id: 'doi-inthanon', name: 'Doi Inthanon', desc: 'ทะเลหมอกสีทองยามรุ่ง พระมหาธาตุเจดีย์คู่ ดอกนางพญาเสือโคร่ง', category: 'thailand' },
+  { id: 'red-lotus-sea', name: 'Red Lotus Sea', desc: 'ล่องเรือกลางทะเลบัวแดงสุดลูกหูลูกตา หมอกบาง ๆ ยามเช้า', category: 'thailand' },
+  { id: 'ayutthaya', name: 'Ayutthaya', desc: 'วัดไชยวัฒนาราม เจดีย์อิฐโบราณ แสงบ่ายสีทอง ชุดไทยโบราณ', category: 'thailand' },
+  { id: 'yaowarat', name: 'Yaowarat', desc: 'ถนนเยาวราชยามค่ำ ไฟนีออนแดงทอง ท่าโพสเท่ ๆ แบบนิตยสารแฟชั่น', category: 'thailand' },
+  { id: 'yaowarat-candid', name: 'Yaowarat Candid', desc: 'เดินชิล ๆ ริมถนนเยาวราช มุมเผลอแบบช่างภาพสตรีท เลนส์เทเล แฟลช ไฟนีออนละลาย', category: 'thailand' },
+  { id: 'yaowarat-tuktuk', name: 'Yaowarat Tuk-Tuk', desc: 'ยืนพิงรถตุ๊กตุ๊กกลางเยาวราชยามค่ำ โพสท่าเท่ ๆ ไฟแฟลชแบบช่างภาพ', category: 'thailand' }
 ] as const;
 
 export interface EventPreset {

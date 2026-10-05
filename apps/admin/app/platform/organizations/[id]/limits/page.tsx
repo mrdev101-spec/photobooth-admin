@@ -32,11 +32,21 @@ export default async function OrganizationLimitsPage({ params }: { params: Promi
           <FormField label="ภาพ AI ต่อเดือน" name="aiMonthlyQuota">
             <Input id="aiMonthlyQuota" name="aiMonthlyQuota" type="number" min={0} defaultValue={org.aiMonthlyQuota ?? ''} placeholder="ไม่จำกัด" />
           </FormField>
+          <FormField label="Template ที่ร้านอัปโหลดเองได้" name="templateQuota" hint="0 = ปิดการอัปโหลด • เว้นว่าง = ไม่จำกัด • นับแบบร่างและที่เผยแพร่อยู่">
+            <Input id="templateQuota" name="templateQuota" type="number" min={0} defaultValue={org.templateQuota ?? ''} placeholder="ไม่จำกัด" />
+          </FormField>
           <label className="flex items-start gap-3 rounded-lg border border-ink-200 p-4 sm:col-span-3">
             <input type="checkbox" name="customerCanAddKiosks" defaultChecked={org.customerCanAddKiosks} className="mt-1 size-5 accent-primary-600" />
             <span>
               <span className="font-semibold text-ink-900">ลูกค้าเพิ่มและจับคู่ตู้เองได้</span>
               <span className="block text-sm text-ink-500">ปิด (ค่าเริ่มต้น) = ทีมแพลตฟอร์มเป็นผู้ลงทะเบียน จับคู่ และยกเลิกการเชื่อมต่อตู้ ลูกค้าจะไม่เห็นปุ่มเหล่านี้</span>
+            </span>
+          </label>
+          <label className="flex items-start gap-3 rounded-lg border border-ink-200 p-4 sm:col-span-3">
+            <input type="checkbox" name="ownStripeAllowed" defaultChecked={org.ownStripeAllowed} className="mt-1 size-5 accent-primary-600" />
+            <span>
+              <span className="font-semibold text-ink-900">ร้านใช้บัญชี Stripe ของตัวเองได้</span>
+              <span className="block text-sm text-ink-500">เปิดแล้วเจ้าของร้านตั้งบัญชีเองที่เมนู การรับเงิน เงินเข้าบัญชีร้านโดยตรง ปิด (ค่าเริ่มต้น) = รับเงินเข้าบัญชีกลางของบริษัท</span>
             </span>
           </label>
         </fieldset>

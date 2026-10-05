@@ -25,7 +25,10 @@ export const ORG_ACTIONS = [
   'payment.view',
   'report.view',
   'log.view',
-  'pickup.use'
+  'pickup.use',
+  /** Event Console (realtime kiosks, print queue, photos) and its actions (reprint / cancel). */
+  'console.view',
+  'console.act'
 ] as const;
 export type OrgAction = (typeof ORG_ACTIONS)[number];
 
@@ -39,10 +42,13 @@ const ORG_MATRIX: Record<OrgRole, readonly OrgAction[]> = {
   manager: [
     'org.view', 'member.view', 'branch.view', 'audit.view',
     'kiosk.view', 'kiosk.manage', 'kiosk.command', 'config.edit', 'template.manage',
-    'order.view', 'order.reprint', 'payment.view', 'report.view', 'log.view', 'pickup.use'
+    'order.view', 'order.reprint', 'payment.view', 'report.view', 'log.view', 'pickup.use',
+    'console.view', 'console.act'
   ],
   designer: ['org.view', 'template.manage', 'kiosk.view'],
   pickup_staff: ['org.view', 'pickup.use', 'order.view'],
+  /** On-site staff: the Event Console of their branches only (no sales totals, no settings). */
+  event_staff: ['org.view', 'console.view', 'console.act'],
   viewer: ['org.view', 'branch.view', 'kiosk.view', 'order.view', 'report.view']
 };
 
@@ -58,7 +64,7 @@ const PLATFORM_MATRIX: Record<PlatformRole, readonly PlatformAction[]> = {
 };
 
 /** Actions that are limited to the branches a manager/pickup user was given. */
-const BRANCH_SCOPED = new Set<OrgAction>(['kiosk.view', 'kiosk.manage', 'kiosk.command', 'config.edit', 'order.view', 'order.reprint', 'pickup.use']);
+const BRANCH_SCOPED = new Set<OrgAction>(['kiosk.view', 'kiosk.manage', 'kiosk.command', 'config.edit', 'order.view', 'order.reprint', 'pickup.use', 'console.view', 'console.act']);
 
 export interface Principal {
   platformRole: PlatformRole | null;
@@ -88,6 +94,7 @@ export const ORG_ROLE_LABELS: Record<OrgRole, string> = {
   manager: 'ผู้จัดการ',
   designer: 'นักออกแบบ',
   pickup_staff: 'พนักงานจุดรับรูป',
+  event_staff: 'พนักงานหน้างาน',
   viewer: 'ผู้ดูรายงาน'
 };
 

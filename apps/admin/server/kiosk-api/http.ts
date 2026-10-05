@@ -30,11 +30,11 @@ export function clientIp(req: NextRequest): string {
 }
 
 /** Reads a JSON body with a size cap; bad JSON is AD0003. */
-export async function readJson(req: NextRequest): Promise<unknown> {
+export async function readJson(req: NextRequest, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
   const declared = Number(req.headers.get('content-length') ?? 0);
-  if (declared > MAX_BODY_BYTES) throw new KioskApiError('AD0003', 413, 'ข้อมูลใหญ่เกินไป');
+  if (declared > maxBytes) throw new KioskApiError('AD0003', 413, 'ข้อมูลใหญ่เกินไป');
   const text = await req.text();
-  if (text.length > MAX_BODY_BYTES) throw new KioskApiError('AD0003', 413, 'ข้อมูลใหญ่เกินไป');
+  if (text.length > maxBytes) throw new KioskApiError('AD0003', 413, 'ข้อมูลใหญ่เกินไป');
   try {
     return text ? JSON.parse(text) : {};
   } catch {

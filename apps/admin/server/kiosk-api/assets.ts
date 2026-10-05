@@ -1,5 +1,6 @@
 import 'server-only';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm';
+import { AI_SCENES } from '@photobooth/catalog';
 import type { AssetManifestResponse, AssetRef, ManifestTemplate, TemplateFiles } from '@photobooth/contracts';
 import { db } from '@/server/db/client';
 import { catalogTemplates, kiosks, templateVersions } from '@/server/db/schema';
@@ -19,10 +20,12 @@ export async function assetManifest(auth: KioskAuth, since: number | null, origi
   }
   if (since != null && since >= revision) return null;
 
+  // Uploaded templates, and built-in ones that carry files (the AI Studio scenes)
   const live = await db()
     .select()
     .from(catalogTemplates)
-    .where(and(eq(catalogTemplates.source, 'uploaded'), eq(catalogTemplates.status, 'published')));
+    // The platform's templates and this customer's own (never another customer's)
+    .where(and(eq(catalogTemplates.status, 'published'), isNotNull(catalogTemplates.publishedVersion), or(isNull(catalogTemplates.orgId), eq(catalogTemplates.orgId, auth.org.id))));
   const versions = live.length ? await db().select().from(templateVersions).where(inArray(templateVersions.templateId, live.map((t) => t.id))) : [];
 
   const templates: ManifestTemplate[] = [];
@@ -33,7 +36,17 @@ export async function assetManifest(auth: KioskAuth, since: number | null, origi
     for (const [k, ref] of Object.entries(v.files) as [keyof TemplateFiles, AssetRef | undefined][]) {
       if (ref) files[k] = { ...ref, url: assetUrl(ref.url, origin) };
     }
-    templates.push({ id: t.id, version: v.version, kind: t.kind, name: t.name ?? t.id, desc: t.description ?? '', tags: t.tags ?? [], files, spec: v.spec });
+    const builtin = t.source === 'builtin' ? AI_SCENES.find((x) => x.id === t.id) : undefined;
+    templates.push({
+      id: t.id,
+      version: v.version,
+      kind: t.kind,
+      name: t.name ?? builtin?.name ?? t.id,
+      desc: t.description ?? builtin?.desc ?? '',
+      tags: t.tags ?? (builtin ? [builtin.category] : []),
+      files,
+      spec: v.spec
+    });
   }
   return { revision, generatedAt: new Date().toISOString(), templates };
 }
