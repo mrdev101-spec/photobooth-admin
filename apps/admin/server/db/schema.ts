@@ -47,7 +47,7 @@ export const organizations = mysqlTable(
     kind: mysqlEnum('kind', ['customer', 'stock']).notNull().default('customer'),
     kioskQuota: int('kiosk_quota').default(5), // NULL = unlimited
     userQuota: int('user_quota').default(3), // customer members; NULL = unlimited (decision D14)
-    aiMonthlyQuota: int('ai_monthly_quota'), // images per month; NULL = unlimited
+    aiMonthlyQuota: int('ai_monthly_quota').default(300), // images per month (new shops 300); NULL = unlimited, set only on purpose by the platform
     /** Templates the customer may upload itself (drafts + published); 0 = off, NULL = unlimited. */
     templateQuota: int('template_quota').default(0),
     /** Customers may add / pair / unpair kiosks themselves (decision D12: off, the platform does it). */

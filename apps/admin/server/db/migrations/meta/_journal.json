@@ -141,6 +141,13 @@
       "when": 1791346884246,
       "tag": "0019_kiosk_archive",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1791874097550,
+      "tag": "0020_ai_quota_default",
+      "breakpoints": true
     }
   ]
 }

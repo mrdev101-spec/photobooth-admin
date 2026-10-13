@@ -40,7 +40,7 @@ export default async function NewOrganizationPage() {
             <Input id="userQuota" name="userQuota" type="number" min={1} defaultValue={3} placeholder="ไม่จำกัด" />
           </FormField>
           <FormField label="ภาพ AI ต่อเดือน" name="aiMonthlyQuota" hint="เว้นว่าง = ไม่จำกัด">
-            <Input id="aiMonthlyQuota" name="aiMonthlyQuota" type="number" min={0} defaultValue={500} placeholder="ไม่จำกัด" />
+            <Input id="aiMonthlyQuota" name="aiMonthlyQuota" type="number" min={0} defaultValue={300} placeholder="ไม่จำกัด" />
           </FormField>
           <div />
 
