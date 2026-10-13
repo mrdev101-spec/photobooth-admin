@@ -106,6 +106,19 @@ export interface KioskSecrets {
     /** true: no keys on the kiosk; it asks POST /kiosk/storage/sign for each upload / download. */
     presign?: boolean;
   } | null;
+  /** GET /kiosk/payments/fallback: Stripe restricted key for selling while the Admin is unreachable. */
+  stripe?: KioskStripeFallback | null;
+}
+
+export interface KioskStripeFallback {
+  mode: 'test' | 'live';
+  /** rk_… restricted key (PaymentIntents only) of the account that receives this shop's money. */
+  key: string;
+  /** Stripe Connect account (direct charges), when the shop is connected. */
+  stripeAccount: string | null;
+  account: 'platform' | 'shop';
+  email: string;
+  qrTimeoutSec: number;
 }
 
 /** POST /kiosk/storage/sign — short-lived URLs for this kiosk's own objects in the shop's bucket. */

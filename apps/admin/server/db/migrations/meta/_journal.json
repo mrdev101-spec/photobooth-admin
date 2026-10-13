@@ -169,6 +169,13 @@
       "when": 1791874884886,
       "tag": "0023_email_2fa",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1791875229251,
+      "tag": "0024_kiosk_stripe_fallback",
+      "breakpoints": true
     }
   ]
 }

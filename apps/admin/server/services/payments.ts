@@ -1,7 +1,8 @@
 import 'server-only';
 import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
+import type { KioskStripeFallback } from '@photobooth/contracts';
 import { db } from '@/server/db/client';
-import { organizations, payments, type Payment } from '@/server/db/schema';
+import { kiosks, organizations, payments, type Payment } from '@/server/db/schema';
 import { newId } from '@/server/lib/ids';
 import { currentSettings, shownSettings } from '@/server/services/kiosk-config';
 import { accountFor, callForPayment, markWebhook, webhookSecrets, type PayMode } from '@/server/services/payment-accounts';
@@ -9,7 +10,7 @@ import { StripeError, stripeRequest, verifyStripeSignature, type StripeCall } fr
 import type { KioskAuth } from '@/server/kiosk-api/auth';
 import { assertCan, type OrgContext } from '@/server/auth/context';
 import { audit } from '@/server/audit';
-import { AppError, notFound } from '@/server/lib/errors';
+import { AppError, isDuplicateKey, notFound } from '@/server/lib/errors';
 
 /**
  * PromptPay payments from kiosks (docs §8.4). The Admin chooses the Stripe account (company or
@@ -249,7 +250,17 @@ export async function handleStripeWebhook(rawBody: string, signature: string | n
   const obj = event?.data?.object;
   if (obj?.object !== 'payment_intent') return [200, { received: true, ignored: true }];
   const row = (await db().select().from(payments).where(eq(payments.stripeIntentId, String(obj.id))).limit(1))[0];
-  if (!row) return [200, { received: true, unknown: true }];
+  if (!row) {
+    // Made by a kiosk while the Admin was unreachable: record it from the signed event
+    if (obj.metadata?.offline === '1' && typeof obj.metadata.kiosk_id === 'string' && verifiedModes.includes(event.livemode ? 'live' : 'test')) {
+      const k = (await db().select({ id: kiosks.id, orgId: kiosks.orgId, branchId: kiosks.branchId }).from(kiosks).where(eq(kiosks.kioskId, obj.metadata.kiosk_id)).limit(1))[0];
+      if (k && (!orgId || k.orgId === orgId)) {
+        await recordOfflineIntent(k.orgId, k, orgId !== null || event.account ? 'shop' : 'platform', event.account ?? null, obj, 'webhook');
+        return [200, { received: true, offline: true }];
+      }
+    }
+    return [200, { received: true, unknown: true }];
+  }
   // An event only counts for the account it came from
   const fromShop = orgId !== null || !!event.account;
   if ((row.account === 'shop') !== fromShop || (orgId && row.orgId !== orgId)) return [200, { received: true, mismatch: true }];
@@ -366,6 +377,73 @@ export async function unservedAiPayments(orgId: string, olderThanMin = 10) {
     .where(and(eq(payments.orgId, orgId), eq(payments.status, 'succeeded'), isNull(payments.usedBy), sql`${payments.product} like 'ai:%'`, lt(payments.paidAt, new Date(Date.now() - olderThanMin * 60_000))))
     .orderBy(desc(payments.paidAt))
     .limit(100);
+}
+
+// ─── Sales while the Admin is unreachable ───────────────────────────────────────────────────
+
+/**
+ * What a kiosk needs to take PromptPay payments straight from Stripe when it cannot reach the
+ * Admin: the restricted key of the account that receives this shop's money, for the mode the
+ * kiosk's screen uses. Null when payments are off or no restricted key is set up.
+ */
+export async function kioskPaymentFallback(auth: KioskAuth): Promise<KioskStripeFallback | null> {
+  const cur = await shownSettings(auth.kiosk);
+  const p = cur?.settings.payment;
+  if (!p?.enabled || p.bypass) return null;
+  if (p.mode === 'live' && !auth.org.livePaymentsAllowed) return null;
+  const acct = await accountFor(auth.org, p.mode as PayMode);
+  if (!acct?.kioskKey) return null;
+  return { mode: p.mode as PayMode, key: acct.kioskKey, stripeAccount: acct.call.stripeAccount ?? null, account: acct.account, email: acct.email || p.email || '', qrTimeoutSec: p.qrTimeoutSec };
+}
+
+/** Records a PaymentIntent a kiosk made itself (metadata.offline = "1"), once. */
+async function recordOfflineIntent(orgId: string, kiosk: { id: string; branchId: string | null }, account: 'platform' | 'shop', stripeAccountId: string | null, intent: any, source: 'webhook' | 'poll') {
+  const status = statusOf(intent);
+  try {
+    await db().insert(payments).values({
+      id: newId('pay'),
+      orgId,
+      kioskRowId: kiosk.id,
+      branchId: kiosk.branchId,
+      account,
+      mode: intent.livemode ? 'live' : 'test',
+      stripeIntentId: String(intent.id),
+      stripeAccountId,
+      amount: Math.round(Number(intent.amount) / 100),
+      product: String(intent.metadata?.product ?? '').slice(0, 100),
+      description: String(intent.description ?? '').slice(0, 200),
+      status,
+      confirmedBy: status === 'succeeded' ? source : null,
+      expiresAt: new Date(),
+      paidAt: status === 'succeeded' ? new Date() : null
+    });
+  } catch (err) {
+    if (!isDuplicateKey(err)) throw err; // the webhook and the kiosk's report raced
+  }
+}
+
+/**
+ * The kiosk reports a payment it made while offline. The Admin never trusts the report alone:
+ * it reads the PaymentIntent from Stripe and checks it was made by this kiosk.
+ */
+export async function kioskOfflinePayment(auth: KioskAuth, stripeIntentId: string): Promise<{ ok: boolean; retry?: boolean; code?: string; message?: string }> {
+  const existing = (await db().select({ orgId: payments.orgId }).from(payments).where(eq(payments.stripeIntentId, stripeIntentId)).limit(1))[0];
+  if (existing) return existing.orgId === auth.org.id ? { ok: true } : { ok: false, code: 'AD0003', message: 'รายการนี้เป็นของบัญชีอื่น' };
+  for (const mode of ['live', 'test'] as const) {
+    const acct = await accountFor(auth.org, mode);
+    if (!acct) continue;
+    let intent: any;
+    try {
+      intent = await stripeRequest(acct.call, 'GET', `/payment_intents/${stripeIntentId}`);
+    } catch (err) {
+      if (err instanceof StripeError && err.status === 404) continue;
+      return { ok: false, retry: true, code: 'PM0005', message: 'อ่านรายการจาก Stripe ไม่ได้ จะลองใหม่' };
+    }
+    if (intent?.metadata?.offline !== '1' || intent?.metadata?.kiosk_id !== auth.kiosk.kioskId) return { ok: false, code: 'AD0003', message: 'รายการนี้ไม่ได้มาจากตู้นี้' };
+    await recordOfflineIntent(auth.org.id, auth.kiosk, acct.account, acct.call.stripeAccount ?? null, intent, 'poll');
+    return { ok: true };
+  }
+  return { ok: false, code: 'AD0003', message: 'ไม่พบรายการนี้ที่ Stripe ของบัญชีนี้' };
 }
 
 export function isPaymentError(e: unknown): e is PaymentFlowError | StripeError {

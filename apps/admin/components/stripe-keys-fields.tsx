@@ -24,6 +24,13 @@ export function StripeKeysFields({ keys, webhookUrl }: { keys: KeysSummary; webh
             <FormField label="Secret key" name={`${m.id}Secret`} hint={k.secret ? 'เว้นว่าง = ใช้ key เดิม • แนะนำ Restricted key' : `${m.secret} หรือ Restricted key (rk_${m.id}_…)`}>
               <Input id={`${m.id}Secret`} name={`${m.id}Secret`} type="password" autoComplete="new-password" placeholder={k.secret ? `…${k.hint}` : m.secret} />
             </FormField>
+            <FormField
+              label="Restricted key สำหรับตู้ (ขายต่อเมื่อ Admin ติดต่อไม่ได้)"
+              name={`${m.id}KioskKey`}
+              hint={k.kioskKey ? `ตั้งไว้แล้ว (…${k.kioskHint}) • เว้นว่าง = ใช้ key เดิม` : `rk_${m.id}_… สร้างใน Stripe › Developers › API keys › Restricted key ให้สิทธิ์ PaymentIntents: Write อย่างเดียว`}
+            >
+              <Input id={`${m.id}KioskKey`} name={`${m.id}KioskKey`} type="password" autoComplete="new-password" placeholder={k.kioskKey ? `…${k.kioskHint}` : `rk_${m.id}_…`} />
+            </FormField>
             <FormField label="Webhook signing secret" name={`${m.id}Webhook`} hint={k.webhook ? 'เว้นว่าง = ใช้ค่าเดิม' : 'whsec_… จาก Stripe › Developers › Webhooks'}>
               <Input id={`${m.id}Webhook`} name={`${m.id}Webhook`} type="password" autoComplete="new-password" placeholder="whsec_…" />
             </FormField>

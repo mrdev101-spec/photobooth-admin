@@ -715,6 +715,11 @@ export const platformPaymentSettings = mysqlTable('platform_payment_settings', {
   testWebhookEnc: text('test_webhook_enc'),
   liveSecretEnc: text('live_secret_enc'),
   liveWebhookEnc: text('live_webhook_enc'),
+  /** Stripe restricted key (rk_…, PaymentIntents only) kiosks use while the Admin is unreachable. */
+  testKioskKeyEnc: text('test_kiosk_key_enc'),
+  liveKioskKeyEnc: text('live_kiosk_key_enc'),
+  testKioskKeyHint: varchar('test_kiosk_key_hint', { length: 8 }).notNull().default(''),
+  liveKioskKeyHint: varchar('live_kiosk_key_hint', { length: 8 }).notNull().default(''),
   testSecretHint: varchar('test_secret_hint', { length: 16 }).notNull().default(''),
   liveSecretHint: varchar('live_secret_hint', { length: 16 }).notNull().default(''),
   /** Stripe needs a payer email for PromptPay; the company's is used. */
@@ -740,6 +745,11 @@ export const orgPaymentAccounts = mysqlTable('org_payment_accounts', {
   testWebhookEnc: text('test_webhook_enc'),
   liveSecretEnc: text('live_secret_enc'),
   liveWebhookEnc: text('live_webhook_enc'),
+  /** Stripe restricted key (rk_…, PaymentIntents only) kiosks use while the Admin is unreachable. */
+  testKioskKeyEnc: text('test_kiosk_key_enc'),
+  liveKioskKeyEnc: text('live_kiosk_key_enc'),
+  testKioskKeyHint: varchar('test_kiosk_key_hint', { length: 8 }).notNull().default(''),
+  liveKioskKeyHint: varchar('live_kiosk_key_hint', { length: 8 }).notNull().default(''),
   testSecretHint: varchar('test_secret_hint', { length: 16 }).notNull().default(''),
   liveSecretHint: varchar('live_secret_hint', { length: 16 }).notNull().default(''),
   connectAccountId: varchar('connect_account_id', { length: 64 }),

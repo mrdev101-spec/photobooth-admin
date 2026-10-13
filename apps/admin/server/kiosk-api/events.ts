@@ -9,6 +9,7 @@ import { isDuplicateKey } from '@/server/lib/errors';
 import type { KioskAuth } from './auth';
 import { KioskApiError } from './http';
 import { usableFiles, createOrderFromKiosk } from './orders';
+import { kioskOfflinePayment } from '@/server/services/payments';
 
 type KioskEvent = z.output<typeof KioskEventSchema>;
 const MAX_THUMB_BYTES = 300 * 1024;
@@ -19,6 +20,7 @@ async function findOrder(auth: KioskAuth, clientOrderId: string) {
 }
 
 async function handle(auth: KioskAuth, ev: KioskEvent): Promise<KioskEventResult> {
+  if (ev.type === 'payment') return kioskOfflinePayment(auth, ev.stripeIntentId);
   if (ev.type === 'order') {
     const { order } = await createOrderFromKiosk(auth, ev.order);
     if (ev.thumbnail) {
