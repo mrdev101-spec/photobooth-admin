@@ -21,7 +21,7 @@ import { KioskApiError } from './http';
  * GET /kiosk/config?since={rev}. `null` means 304 (the kiosk already has the latest).
  * Secrets are sealed to this request's device token, so they are useless to anyone else.
  */
-export async function kioskConfig(auth: KioskAuth, since: number | null): Promise<KioskConfigResponse | null> {
+export async function kioskConfig(auth: KioskAuth, since: number | null, { presign = false } = {}): Promise<KioskConfigResponse | null> {
   const { kiosk } = auth;
   if (since != null && since >= kiosk.currentRevision) return null;
   const row = (
@@ -32,7 +32,8 @@ export async function kioskConfig(auth: KioskAuth, since: number | null): Promis
       .limit(1)
   )[0];
   if (!row) throw new KioskApiError('AD0000', 500, 'ไม่พบการตั้งค่าของตู้');
-  const secrets = await kioskSecretsFor(auth.org.id);
+  // Kiosks that sign through the Admin (caps=r2-presign) never receive the shop's R2 keys
+  const secrets = await kioskSecretsFor(auth.org.id, { presign });
   return {
     kioskId: kiosk.kioskId!,
     revision: row.revision,

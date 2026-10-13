@@ -10,6 +10,7 @@ import { decryptSecret, encryptSecret } from '@/server/lib/crypto';
 import { AppError } from '@/server/lib/errors';
 import { r2Endpoint, testR2, type R2Credentials } from '@/server/lib/r2';
 import { bumpAllKiosks } from './kiosk-config';
+import { presignUrl } from '@/server/lib/r2-presign';
 
 /** Per-customer R2 storage. Only the platform team sets it; customers see a read-only summary. */
 
@@ -143,15 +144,32 @@ export async function testStorage(ctx: PlatformContext, orgId: string) {
   return result;
 }
 
-/** Plaintext secrets for one kiosk config response (sealed with the device token by the caller). */
-export async function kioskSecretsFor(orgId: string): Promise<KioskSecrets | null> {
+/**
+ * Plaintext secrets for one kiosk config response (sealed with the device token by the caller).
+ * A kiosk that can ask for signed URLs (`presign`) gets the bucket details but no keys.
+ */
+export async function kioskSecretsFor(orgId: string, { presign = false } = {}): Promise<KioskSecrets | null> {
   const r = await row(orgId);
   if (!r) return null;
   const c = credentialsOf(r);
+  const base = { accountId: c.accountId, endpoint: r2Endpoint(c), bucket: c.bucket, publicUrl: r.publicUrl };
   return {
     version: r.secretsVersion,
-    r2: { accountId: c.accountId, endpoint: r2Endpoint(c), bucket: c.bucket, accessKeyId: c.accessKeyId, secretAccessKey: c.secretAccessKey, publicUrl: r.publicUrl }
+    r2: presign ? { ...base, presign: true } : { ...base, accessKeyId: c.accessKeyId, secretAccessKey: c.secretAccessKey }
   };
+}
+
+/** Signs short-lived URLs for objects in a shop's bucket (keys checked by the caller). */
+export async function presignForOrg(orgId: string, items: { method: string; key: string }[], expiresSec: number) {
+  const r = await row(orgId);
+  if (!r) return null;
+  const c = credentialsOf(r);
+  const origin = r2Endpoint(c).replace(/\/+$/, '');
+  return items.map((it) => ({
+    method: it.method,
+    key: it.key,
+    url: presignUrl({ method: it.method, origin, path: `/${c.bucket}/${it.key}`, region: 'auto', accessKeyId: c.accessKeyId, secretAccessKey: c.secretAccessKey, expiresSec })
+  }));
 }
 
 export async function hasStorage(orgId: string): Promise<boolean> {
