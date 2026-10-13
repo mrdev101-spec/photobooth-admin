@@ -99,10 +99,25 @@ export interface KioskSecrets {
     accountId: string;
     endpoint: string;
     bucket: string;
-    accessKeyId: string;
-    secretAccessKey: string;
+    /** Only for kiosks that cannot ask for signed URLs (older builds). */
+    accessKeyId?: string;
+    secretAccessKey?: string;
     publicUrl: string;
+    /** true: no keys on the kiosk; it asks POST /kiosk/storage/sign for each upload / download. */
+    presign?: boolean;
   } | null;
+}
+
+/** POST /kiosk/storage/sign — short-lived URLs for this kiosk's own objects in the shop's bucket. */
+export const StorageSignRequestSchema = z.object({
+  requests: z
+    .array(z.object({ method: z.enum(['PUT', 'GET', 'HEAD', 'DELETE']), key: z.string().min(1).max(300) }))
+    .min(1)
+    .max(20)
+});
+export interface StorageSignResponse {
+  urls: { method: string; key: string; url: string }[];
+  expiresAt: string;
 }
 
 export interface SealedSecrets {
