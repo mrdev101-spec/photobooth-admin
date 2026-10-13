@@ -64,7 +64,7 @@ export default async function PaymentsSettingsPage({ params }: { params: Promise
           <Card
             className="max-w-3xl"
             title="บัญชี Stripe ของร้าน"
-            subtitle="ผู้ให้บริการเปิดสิทธิ์ให้ร้านนี้ใช้บัญชีของตัวเองแล้ว key เก็บแบบเข้ารหัส ไม่ส่งไปที่ตู้"
+            subtitle="ผู้ให้บริการเปิดสิทธิ์ให้ร้านนี้ใช้บัญชีของตัวเองแล้ว key เก็บแบบเข้ารหัส Secret key ไม่ส่งไปที่ตู้ (ตู้ได้เฉพาะ Restricted key สำหรับขายตอน Admin ล่ม)"
             icon={<Link2 aria-hidden />}
             actions={s.lastTestOk ? <Badge tone="success" dot>ทดสอบผ่าน</Badge> : s.lastTestOk === false ? <Badge tone="danger" dot>ทดสอบไม่ผ่าน</Badge> : null}
           >
