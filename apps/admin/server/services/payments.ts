@@ -7,6 +7,9 @@ import { currentSettings, shownSettings } from '@/server/services/kiosk-config';
 import { accountFor, callForPayment, markWebhook, webhookSecrets, type PayMode } from '@/server/services/payment-accounts';
 import { StripeError, stripeRequest, verifyStripeSignature, type StripeCall } from '@/server/payments/stripe';
 import type { KioskAuth } from '@/server/kiosk-api/auth';
+import { assertCan, type OrgContext } from '@/server/auth/context';
+import { audit } from '@/server/audit';
+import { AppError, notFound } from '@/server/lib/errors';
 
 /**
  * PromptPay payments from kiosks (docs §8.4). The Admin chooses the Stripe account (company or
@@ -16,7 +19,7 @@ import type { KioskAuth } from '@/server/kiosk-api/auth';
 
 const MIN_AMOUNT_THB = 10;
 const MAX_AMOUNT_THB = 10_000;
-const FINAL = new Set<Payment['status']>(['succeeded', 'canceled', 'failed']);
+const FINAL = new Set<Payment['status']>(['succeeded', 'canceled', 'failed', 'refunded']);
 
 export class PaymentFlowError extends Error {
   constructor(
@@ -157,7 +160,7 @@ async function record(row: Payment, intent: any, source: 'webhook' | 'poll' | 'c
     Object.assign(patch, await feeOf(row, call).catch(() => ({})));
   }
   // Never move a final state backwards (a late webhook after a poll, etc.)
-  await db().update(payments).set(patch).where(and(eq(payments.id, row.id), sql`${payments.status} not in ('succeeded','canceled','failed')`));
+  await db().update(payments).set(patch).where(and(eq(payments.id, row.id), sql`${payments.status} not in ('succeeded','canceled','failed','refunded')`));
   return { ...row, ...patch };
 }
 
@@ -302,6 +305,54 @@ export async function revenueByOrg(from: Date, to: Date, mode: PayMode = 'live')
 
 export async function orgPayments(orgId: string, limit = 50) {
   return db().select().from(payments).where(eq(payments.orgId, orgId)).orderBy(desc(payments.createdAt)).limit(limit);
+}
+
+/**
+ * Gives a customer their money back (full amount) through the Stripe account that received it.
+ * Idempotent at Stripe (one refund per payment); recorded on the payment and in the audit log.
+ */
+export async function refundPayment(ctx: OrgContext, paymentId: string, reason: string, customerEmail = '') {
+  assertCan(ctx, 'payment.refund');
+  const row = (await db().select().from(payments).where(and(eq(payments.id, paymentId), eq(payments.orgId, ctx.org.id))).limit(1))[0];
+  if (!row) throw notFound('รายการชำระเงิน');
+  if (row.status === 'refunded') throw new AppError('รายการนี้คืนเงินไปแล้ว', 'conflict');
+  if (row.status !== 'succeeded') throw new AppError('คืนเงินได้เฉพาะรายการที่ชำระเงินสำเร็จแล้ว');
+  const call = await callFor(row);
+  let refund: any;
+  try {
+    // PromptPay has no way back to the payer's account: Stripe emails the customer to collect
+    // their bank details, so it needs the customer's email (the payment only knows the shop's)
+    refund = await stripeRequest(
+      call,
+      'POST',
+      '/refunds',
+      { payment_intent: row.stripeIntentId, reason: 'requested_by_customer', ...(customerEmail ? { instructions_email: customerEmail } : {}), metadata: { payment_id: row.id, refunded_by: ctx.user.id } },
+      `refund-${row.id}-${customerEmail || 'none'}`
+    );
+  } catch (err) {
+    if (err instanceof StripeError && /email|instructions/i.test(err.message) && !customerEmail) {
+      throw new AppError('PromptPay คืนเงินกลับบัญชีเดิมอัตโนมัติไม่ได้ กรอกอีเมลลูกค้า Stripe จะส่งอีเมลให้ลูกค้ากรอกบัญชีรับเงินคืน');
+    }
+    if (err instanceof StripeError && row.mode === 'test' && /verify the email/i.test(err.message)) {
+      throw new AppError('โหมดทดสอบของ Stripe ส่งอีเมลคืนเงินได้เฉพาะอีเมลที่ยืนยันแล้วในบัญชี Stripe (โหมดจริงส่งถึงลูกค้าได้ตามปกติ)');
+    }
+    if (err instanceof StripeError) throw new AppError(`Stripe ไม่รับการคืนเงิน: ${err.message}`);
+    throw err;
+  }
+  if (refund?.status === 'failed' || refund?.status === 'canceled') throw new AppError(`Stripe คืนเงินไม่สำเร็จ (${refund.status})`);
+  const now = new Date();
+  await db()
+    .update(payments)
+    .set({ status: 'refunded', refundedAt: now, refundId: String(refund?.id ?? ''), refundedBy: ctx.user.id, refundReason: reason.slice(0, 200), refundStatus: String(refund?.status ?? 'succeeded').slice(0, 20) })
+    .where(and(eq(payments.id, row.id), eq(payments.status, 'succeeded')));
+  await audit({ user: ctx.user, orgId: ctx.org.id, actingAsPlatform: ctx.actingAsPlatform }, {
+    action: 'payment.refund',
+    resourceType: 'payment',
+    resourceId: row.id,
+    before: { status: row.status, amount: row.amount, usedBy: row.usedBy },
+    after: { status: 'refunded', refundId: refund?.id ?? null, refundStatus: refund?.status ?? null, reason }
+  });
+  return { refundStatus: String(refund?.status ?? 'succeeded') };
 }
 
 /**

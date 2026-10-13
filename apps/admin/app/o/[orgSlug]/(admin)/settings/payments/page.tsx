@@ -9,7 +9,7 @@ import { ActionForm, FormField, SubmitButton } from '@/components/form';
 import { StripeKeysFields } from '@/components/stripe-keys-fields';
 import { Badge, Card, DetailRow, EmptyState, Input, Notice, PageHeader, Table, Td, Th } from '@/components/ui';
 import { formatBaht, formatDateTime } from '@/lib/format';
-import { saveOrgPaymentAction, testOrgPaymentAction } from './actions';
+import { refundPaymentAction, saveOrgPaymentAction, testOrgPaymentAction } from './actions';
 
 export const metadata: Metadata = { title: 'การรับเงิน' };
 
@@ -18,13 +18,27 @@ const STATUS: Record<string, { label: string; tone: 'success' | 'danger' | 'info
   requires_action: { label: 'รอสแกน', tone: 'info' },
   processing: { label: 'กำลังตรวจ', tone: 'info' },
   canceled: { label: 'ยกเลิก/หมดเวลา', tone: 'neutral' },
-  failed: { label: 'ไม่สำเร็จ', tone: 'danger' }
+  failed: { label: 'ไม่สำเร็จ', tone: 'danger' },
+  refunded: { label: 'คืนเงินแล้ว', tone: 'neutral' }
 };
+
+function RefundButton({ orgSlug, paymentId, amount, reason }: { orgSlug: string; paymentId: string; amount: number; reason: string }) {
+  return (
+    <ActionForm action={refundPaymentAction.bind(null, orgSlug, paymentId, reason)} confirm={`คืนเงิน ${formatBaht(amount)} ให้ลูกค้า? รายการนี้ยกเลิกไม่ได้`} className="flex items-center justify-end gap-2">
+      {/* PromptPay: Stripe emails the customer for the bank account to refund to */}
+      <Input name="email" type="email" placeholder="อีเมลลูกค้า" aria-label="อีเมลลูกค้าสำหรับรับเงินคืน" className="h-8 w-48 text-sm" />
+      <SubmitButton variant="outline" size="sm" pendingLabel="กำลังคืนเงิน…">
+        คืนเงิน
+      </SubmitButton>
+    </ActionForm>
+  );
+}
 
 export default async function PaymentsSettingsPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
   const ctx = await requireOrg(orgSlug, 'payment.view');
   const canManage = can(ctx.principal, 'org.settings');
+  const canRefund = can(ctx.principal, 'payment.refund');
   const [s, list, origin, unserved] = await Promise.all([orgPaymentSummary(ctx.org), orgPayments(ctx.org.id, 30), publicOrigin(), unservedAiPayments(ctx.org.id)]);
   const unservedIds = new Set(unserved.map((p) => p.id));
 
@@ -113,7 +127,7 @@ export default async function PaymentsSettingsPage({ params }: { params: Promise
         {unserved.length ? (
           <Card flush title={`ชำระเงินแล้วแต่ยังไม่ได้รับภาพ AI (${unserved.length})`} icon={<CircleAlert aria-hidden />}>
             <p className="px-5 pt-1 pb-3 text-sm text-ink-600">
-              ลูกค้าจ่ายเงินแล้วแต่สร้างภาพไม่สำเร็จ ให้ลูกค้าลองใหม่ที่ตู้ หรือคืนเงินในหน้า Stripe Dashboard ด้วยรหัส PaymentIntent ด้านล่าง
+              ลูกค้าจ่ายเงินแล้วแต่สร้างภาพไม่สำเร็จ ให้ลูกค้าลองใหม่ที่ตู้ หรือกด "คืนเงิน" (คืนเต็มจำนวนผ่าน Stripe)
             </p>
             <Table bare>
               <thead>
@@ -122,6 +136,7 @@ export default async function PaymentsSettingsPage({ params }: { params: Promise
                   <Th>รายการ</Th>
                   <Th className="text-right">ยอด</Th>
                   <Th>Stripe PaymentIntent</Th>
+                  {canRefund ? <Th /> : null}
                 </tr>
               </thead>
               <tbody>
@@ -134,6 +149,11 @@ export default async function PaymentsSettingsPage({ params }: { params: Promise
                     </Td>
                     <Td className="text-right tabular-nums">{formatBaht(p.amount)}</Td>
                     <Td className="font-mono text-sm">{p.stripeIntentId}</Td>
+                    {canRefund ? (
+                      <Td className="text-right">
+                        <RefundButton orgSlug={orgSlug} paymentId={p.id} amount={p.amount} reason="ลูกค้าจ่ายเงินแล้วแต่ไม่ได้รับภาพ AI" />
+                      </Td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>
@@ -151,6 +171,7 @@ export default async function PaymentsSettingsPage({ params }: { params: Promise
                   <Th className="text-right">ยอด</Th>
                   <Th>สถานะ</Th>
                   <Th>บัญชี</Th>
+                  {canRefund ? <Th /> : null}
                 </tr>
               </thead>
               <tbody>
@@ -164,9 +185,15 @@ export default async function PaymentsSettingsPage({ params }: { params: Promise
                     <Td className="text-right tabular-nums">{formatBaht(p.amount)}</Td>
                     <Td>
                       <Badge tone={STATUS[p.status]?.tone ?? 'neutral'}>{STATUS[p.status]?.label ?? p.status}</Badge>
+                      {p.status === 'refunded' && p.refundStatus === 'requires_action' ? <Badge className="ml-2">รอลูกค้ากรอกบัญชี</Badge> : null}
                       {unservedIds.has(p.id) ? <Badge tone="danger" className="ml-2">ยังไม่ได้รับภาพ</Badge> : null}
                     </Td>
                     <Td className="text-sm text-ink-600">{p.account === 'shop' ? 'บัญชีร้าน' : 'บัญชีกลาง'}</Td>
+                    {canRefund ? (
+                      <Td className="text-right">
+                        {p.status === 'succeeded' ? <RefundButton orgSlug={orgSlug} paymentId={p.id} amount={p.amount} reason="คืนเงินตามคำขอของลูกค้า" /> : null}
+                      </Td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>

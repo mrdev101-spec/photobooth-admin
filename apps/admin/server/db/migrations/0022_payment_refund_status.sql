@@ -1,0 +1,1 @@
+ALTER TABLE `payments` ADD `refund_status` varchar(20);

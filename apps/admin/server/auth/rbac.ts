@@ -23,6 +23,8 @@ export const ORG_ACTIONS = [
   'order.view',
   'order.reprint',
   'payment.view',
+  /** Refund a customer's payment through Stripe (owner, manager, platform admin). */
+  'payment.refund',
   'report.view',
   'log.view',
   'pickup.use',
@@ -42,7 +44,7 @@ const ORG_MATRIX: Record<OrgRole, readonly OrgAction[]> = {
   manager: [
     'org.view', 'member.view', 'branch.view', 'audit.view',
     'kiosk.view', 'kiosk.manage', 'kiosk.command', 'config.edit', 'template.manage',
-    'order.view', 'order.reprint', 'payment.view', 'report.view', 'log.view', 'pickup.use',
+    'order.view', 'order.reprint', 'payment.view', 'payment.refund', 'report.view', 'log.view', 'pickup.use',
     'console.view', 'console.act'
   ],
   designer: ['org.view', 'template.manage', 'kiosk.view'],
