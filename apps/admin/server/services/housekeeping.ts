@@ -1,7 +1,7 @@
 import 'server-only';
 import { and, inArray, lt } from 'drizzle-orm';
 import { db } from '@/server/db/client';
-import { kioskCommands, rateLimits, userSessions } from '@/server/db/schema';
+import { kioskCommands, loginChallenges, rateLimits, trustedDevices, userSessions } from '@/server/db/schema';
 import { sweepAiJobs } from '@/server/services/ai-jobs';
 import { fillMissingFees, sweepExpiredPayments } from '@/server/services/payments';
 import { sweepPhoneUploads } from '@/server/services/phone-uploads';
@@ -31,6 +31,8 @@ export async function runHousekeeping() {
   await step('stripeFees', () => fillMissingFees(50));
   await step('phoneUploads', () => sweepPhoneUploads());
   await step('sessions', async () => affected(await db().delete(userSessions).where(lt(userSessions.expiresAt, new Date(Date.now() - DAY)))));
+  await step('loginChallenges', async () => affected(await db().delete(loginChallenges).where(lt(loginChallenges.expiresAt, new Date()))));
+  await step('trustedDevices', async () => affected(await db().delete(trustedDevices).where(lt(trustedDevices.expiresAt, new Date()))));
   await step('rateLimits', async () => affected(await db().delete(rateLimits).where(lt(rateLimits.windowStart, new Date(Date.now() - DAY)))));
   await step('kioskCommands', async () =>
     affected(await db().delete(kioskCommands).where(and(inArray(kioskCommands.status, ['done', 'failed']), lt(kioskCommands.createdAt, new Date(Date.now() - 30 * DAY)))))
