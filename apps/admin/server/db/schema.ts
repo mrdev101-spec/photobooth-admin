@@ -720,7 +720,7 @@ export const orgPaymentAccounts = mysqlTable('org_payment_accounts', {
   updatedAt: updatedAt()
 });
 
-export const PAYMENT_STATUSES = ['requires_action', 'processing', 'succeeded', 'canceled', 'failed'] as const;
+export const PAYMENT_STATUSES = ['requires_action', 'processing', 'succeeded', 'canceled', 'failed', 'refunded'] as const;
 
 /** One PromptPay payment from a kiosk. `account` says whose Stripe account received the money. */
 export const payments = mysqlTable(
@@ -747,6 +747,13 @@ export const payments = mysqlTable(
     usedBy: varchar('used_by', { length: 40 }),
     expiresAt: datetime('expires_at', { mode: 'date', fsp: 3 }).notNull(),
     paidAt: datetime('paid_at', { mode: 'date', fsp: 3 }),
+    /** Refund made from the Admin (full amount): Stripe refund id, who and why. */
+    refundedAt: datetime('refunded_at', { mode: 'date', fsp: 3 }),
+    refundId: varchar('refund_id', { length: 64 }),
+    refundedBy: varchar('refunded_by', { length: 40 }),
+    refundReason: varchar('refund_reason', { length: 200 }),
+    /** Stripe's refund status: succeeded, pending, or requires_action (PromptPay: waiting for the customer's bank details). */
+    refundStatus: varchar('refund_status', { length: 20 }),
     createdAt: createdAt(),
     updatedAt: updatedAt()
   },
