@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { authenticate } from '@/server/services/accounts';
-import { createSession } from '@/server/auth/session';
+import { createSession, requestMeta } from '@/server/auth/session';
 import { runAction, type ActionState } from '@/server/lib/action';
 
 const LoginInput = z.object({
@@ -14,7 +14,7 @@ const LoginInput = z.object({
 export async function loginAction(_: ActionState, form: FormData): Promise<ActionState> {
   const result = await runAction(async () => {
     const input = LoginInput.parse({ email: form.get('email'), password: form.get('password') });
-    const userId = await authenticate(input.email, input.password);
+    const userId = await authenticate(input.email, input.password, (await requestMeta()).ip);
     await createSession(userId);
     return { ok: true };
   });

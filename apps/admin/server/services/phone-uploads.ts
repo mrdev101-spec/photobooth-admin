@@ -22,7 +22,8 @@ const hashToken = (token: string) => createHash('sha256').update(token).digest('
 const expired = (row: { expiresAt: Date }) => row.expiresAt.getTime() < Date.now();
 
 /** Old sessions and their photos go (called on every use). */
-async function sweep() {
+/** Drops expired / finished sessions' photos (also run by the housekeeping cron). */
+export async function sweepPhoneUploads() {
   const old = await db()
     .select({ id: phoneUploads.id })
     .from(phoneUploads)
@@ -37,7 +38,7 @@ async function sweep() {
 
 /** Kiosk: a new session for `count` photos. Only when the shop switched the feature on. */
 export async function createPhoneUpload(auth: KioskAuth, count: number, origin: string): Promise<PhoneUploadSession> {
-  await sweep();
+  await sweepPhoneUploads();
   const cur = await currentSettings(auth.kiosk);
   if (!cur?.settings.phoneUpload?.enabled) throw new KioskApiError('AD0005', 403, 'ร้านยังไม่ได้เปิดให้ส่งรูปจากมือถือ');
   // A kiosk never needs many at once: earlier open sessions of this kiosk are closed

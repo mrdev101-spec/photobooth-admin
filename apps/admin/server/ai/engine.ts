@@ -1,4 +1,5 @@
 import 'server-only';
+import { endpointOverride } from '@/server/lib/env';
 
 /*
  * Image generation through the platform's AI account (ported from the kiosk's aiStudio.cjs).
@@ -8,9 +9,9 @@ import 'server-only';
  */
 
 // Overridable for a proxy (or a stand-in provider in tests): AI_GOOGLE_BASE_URL etc.
-const GOOGLE_API_BASE = process.env.AI_GOOGLE_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta';
-const OPENROUTER_API_BASE = process.env.AI_OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
-const OPENAI_API_BASE = process.env.AI_OPENAI_BASE_URL || 'https://api.openai.com/v1';
+const GOOGLE_API_BASE = endpointOverride('AI_GOOGLE_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta');
+const OPENROUTER_API_BASE = endpointOverride('AI_OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1');
+const OPENAI_API_BASE = endpointOverride('AI_OPENAI_BASE_URL', 'https://api.openai.com/v1');
 const REQUEST_TIMEOUT_MS = 120_000;
 const OPENAI_TIMEOUT_MS = 180_000; // GPT Image at high quality can take up to ~2 minutes
 const ASPECT_RATIO = '2:3'; // 4x6" photo paper

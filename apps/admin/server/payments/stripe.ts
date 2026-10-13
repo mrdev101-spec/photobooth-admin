@@ -1,4 +1,5 @@
 import 'server-only';
+import { endpointOverride } from '@/server/lib/env';
 
 export { verifyStripeSignature } from './signature';
 
@@ -8,7 +9,7 @@ export { verifyStripeSignature } from './signature';
  * `stripeAccount` = a Stripe Connect account the call acts on (direct charges).
  */
 
-const STRIPE_API = process.env.STRIPE_API_BASE_URL || 'https://api.stripe.com/v1';
+const STRIPE_API = endpointOverride('STRIPE_API_BASE_URL', 'https://api.stripe.com/v1');
 const REQUEST_TIMEOUT_MS = 20_000;
 
 export class StripeError extends Error {

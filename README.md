@@ -91,16 +91,18 @@ powershell -ExecutionPolicy Bypass -File scripts/local-db.ps1
 |---|---|
 | `npm run dev` | dev server (พอร์ต 3100) |
 | `npm run build` | production build |
-| `npm test` | unit tests ทุก workspace (+ integration test กับ DB ในเครื่อง ถ้ามี `apps/admin/.env.local`) |
+| `npm test` | unit tests ทุก workspace (ไม่แตะฐานข้อมูล) |
+| `npm run test:integration -w @photobooth/admin` | integration test ที่เขียนลง DB ใน `apps/admin/.env.local` (ใช้กับ DB ทดสอบเท่านั้น) |
 | `npm run typecheck` | ตรวจ TypeScript ทุก workspace |
 | `npm run db:generate` | สร้าง migration SQL จาก `server/db/schema.ts` (ไม่ต้องต่อ DB) |
 | `npm run db:migrate` | รัน migration กับ DB ใน `DATABASE_URL` |
 | `npm run db:seed` | สร้าง/เลื่อนขั้นผู้ดูแลแพลตฟอร์มจาก `SEED_ADMIN_*` |
 
-## Deploy (Vercel)
+## Deploy
 
-- Root Directory: `apps/admin` • Region: `sin1` (อยู่ใน `vercel.json`) • ต้องใช้แพ็กเกจ Pro
-- Environment Variables: `DATABASE_URL`, `DATABASE_SSL=true`, `MASTER_KEY` (แยกค่าระหว่าง Production / Preview)
+ดูขั้นตอนเต็มใน [docs/DEPLOY.md](docs/DEPLOY.md): environment variables ทั้งหมด, ลำดับ migrate และ seed, Stripe webhook, R2, cron เก็บกวาด, `/healthz`, backup และ checklist ก่อนเปิดรับเงินจริง
+
+- Vercel: Root Directory `apps/admin`, Region `sin1` (ตั้งใน `vercel.json` พร้อม cron), ต้องใช้แพ็กเกจ Pro
 - รัน `npm run db:migrate` กับ DB production ก่อน deploy เวอร์ชันที่มี migration ใหม่
 
 ## หมายเหตุ MariaDB
