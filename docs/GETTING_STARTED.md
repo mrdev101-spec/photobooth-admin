@@ -17,6 +17,8 @@
 
 ## 2. โปรแกรมที่ต้องติดตั้ง
 
+ขั้นตอนข้อ 2 และ 4 เขียนสำหรับ Windows ถ้าพัฒนาบน Mac (แนวทางหลักของทีม) ให้ใช้ `docs/MAC_SETUP.md` ใน repo ตู้ ([photobooth-v1](https://github.com/mrdev101-spec/photobooth-v1/blob/dev/docs/MAC_SETUP.md)) สำหรับการติดตั้งโปรแกรมและฐานข้อมูล แล้วกลับมาทำข้อ 5 เป็นต้นไป
+
 | โปรแกรม | ติดตั้ง |
 |---|---|
 | Git | `winget install Git.Git` |
