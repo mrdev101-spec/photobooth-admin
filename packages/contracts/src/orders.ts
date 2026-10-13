@@ -104,6 +104,12 @@ export const KioskEventSchema = z.discriminatedUnion('type', [
     at: z.iso.datetime()
   }),
   z.object({
+    /** A PromptPay payment the kiosk made straight with Stripe while the Admin was unreachable. */
+    type: z.literal('payment'),
+    stripeIntentId: z.string().regex(/^pi_[A-Za-z0-9]+$/),
+    at: z.iso.datetime()
+  }),
+  z.object({
     type: z.literal('files'),
     clientOrderId: z.string().min(1).max(64),
     downloadUrl: httpUrl.optional(),

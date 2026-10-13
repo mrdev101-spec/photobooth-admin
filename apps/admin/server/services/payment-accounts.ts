@@ -24,6 +24,13 @@ const secretKey = (mode: PayMode) =>
     .max(300)
     .refine((v) => !v || new RegExp(`^(sk|rk)_${mode}_[A-Za-z0-9]+$`).test(v), `ต้องเป็น Secret key แบบ ${mode === 'live' ? 'จริง (sk_live_…)' : 'ทดสอบ (sk_test_…)'}`)
     .default('');
+const kioskKey = (mode: PayMode) =>
+  z
+    .string()
+    .trim()
+    .max(300)
+    .refine((v) => !v || new RegExp(`^rk_${mode}_[A-Za-z0-9]+$`).test(v), `ต้องเป็น Restricted key แบบ${mode === 'live' ? 'จริง (rk_live_…)' : 'ทดสอบ (rk_test_…)'}`)
+    .default('');
 const webhookKey = z
   .string()
   .trim()
@@ -36,22 +43,27 @@ export const PaymentKeysInput = z.object({
   testWebhook: webhookKey,
   liveSecret: secretKey('live'),
   liveWebhook: webhookKey,
+  testKioskKey: kioskKey('test'),
+  liveKioskKey: kioskKey('live'),
   clearKeys: z.array(z.enum(['test', 'live'])).default([]),
   email: z.union([z.literal(''), z.email('อีเมลไม่ถูกต้อง')]).default('')
 });
 export const OrgPaymentInput = PaymentKeysInput.extend({ active: z.boolean().default(false) });
 
-type KeyRow = Pick<PlatformPaymentSettings, 'testSecretEnc' | 'testWebhookEnc' | 'liveSecretEnc' | 'liveWebhookEnc' | 'testSecretHint' | 'liveSecretHint'>;
+type KeyRow = Pick<
+  PlatformPaymentSettings,
+  'testSecretEnc' | 'testWebhookEnc' | 'liveSecretEnc' | 'liveWebhookEnc' | 'testSecretHint' | 'liveSecretHint' | 'testKioskKeyEnc' | 'liveKioskKeyEnc' | 'testKioskKeyHint' | 'liveKioskKeyHint'
+>;
 
 export interface KeysSummary {
-  test: { secret: boolean; hint: string; webhook: boolean };
-  live: { secret: boolean; hint: string; webhook: boolean };
+  test: { secret: boolean; hint: string; webhook: boolean; kioskKey: boolean; kioskHint: string };
+  live: { secret: boolean; hint: string; webhook: boolean; kioskKey: boolean; kioskHint: string };
 }
 
 function keysSummary(r: KeyRow | undefined): KeysSummary {
   return {
-    test: { secret: !!r?.testSecretEnc, hint: r?.testSecretHint ?? '', webhook: !!r?.testWebhookEnc },
-    live: { secret: !!r?.liveSecretEnc, hint: r?.liveSecretHint ?? '', webhook: !!r?.liveWebhookEnc }
+    test: { secret: !!r?.testSecretEnc, hint: r?.testSecretHint ?? '', webhook: !!r?.testWebhookEnc, kioskKey: !!r?.testKioskKeyEnc, kioskHint: r?.testKioskKeyHint ?? '' },
+    live: { secret: !!r?.liveSecretEnc, hint: r?.liveSecretHint ?? '', webhook: !!r?.liveWebhookEnc, kioskKey: !!r?.liveKioskKeyEnc, kioskHint: r?.liveKioskKeyHint ?? '' }
   };
 }
 
@@ -59,9 +71,11 @@ function keysSummary(r: KeyRow | undefined): KeysSummary {
 function keyColumns(input: z.infer<typeof PaymentKeysInput>) {
   const cols: Record<string, string | null> = {};
   for (const mode of ['test', 'live'] as const) {
-    if (input.clearKeys.includes(mode)) Object.assign(cols, { [`${mode}SecretEnc`]: null, [`${mode}WebhookEnc`]: null, [`${mode}SecretHint`]: '' });
+    if (input.clearKeys.includes(mode)) Object.assign(cols, { [`${mode}SecretEnc`]: null, [`${mode}WebhookEnc`]: null, [`${mode}SecretHint`]: '', [`${mode}KioskKeyEnc`]: null, [`${mode}KioskKeyHint`]: '' });
     const secret = input[`${mode}Secret`];
     const webhook = input[`${mode}Webhook`];
+    const kiosk = input[`${mode}KioskKey`];
+    if (kiosk) Object.assign(cols, { [`${mode}KioskKeyEnc`]: encryptSecret(kiosk), [`${mode}KioskKeyHint`]: kiosk.slice(-4) });
     if (secret) Object.assign(cols, { [`${mode}SecretEnc`]: encryptSecret(secret), [`${mode}SecretHint`]: secret.slice(-4) });
     if (webhook) cols[`${mode}WebhookEnc`] = encryptSecret(webhook);
   }
@@ -69,7 +83,7 @@ function keyColumns(input: z.infer<typeof PaymentKeysInput>) {
 }
 
 const changedModes = (input: z.infer<typeof PaymentKeysInput>) =>
-  (['test', 'live'] as const).filter((m) => input[`${m}Secret`] || input[`${m}Webhook`] || input.clearKeys.includes(m));
+  (['test', 'live'] as const).filter((m) => input[`${m}Secret`] || input[`${m}Webhook`] || input[`${m}KioskKey`] || input.clearKeys.includes(m));
 
 // ─── The company account ─────────────────────────────────────────────────────
 
@@ -159,6 +173,8 @@ export interface ResolvedAccount {
   call: StripeCall;
   webhookSecret: string | null;
   email: string;
+  /** Restricted key for kiosks selling while the Admin is unreachable (null = not set up). */
+  kioskKey: string | null;
 }
 
 /** The account for a customer's payment in `mode`, or null when none is set up for that mode. */
@@ -167,15 +183,16 @@ export async function accountFor(org: Pick<Organization, 'id' | 'ownStripeAllowe
   const own = org.ownStripeAllowed ? await orgRow(org.id) : undefined;
   const secretOf = (r: KeyRow | undefined) => (r?.[`${mode}SecretEnc`] ? decryptSecret(r[`${mode}SecretEnc`]!) : null);
   const webhookOf = (r: KeyRow | undefined) => (r?.[`${mode}WebhookEnc`] ? decryptSecret(r[`${mode}WebhookEnc`]!) : null);
+  const kioskOf = (r: KeyRow | undefined) => (r?.[`${mode}KioskKeyEnc`] ? decryptSecret(r[`${mode}KioskKeyEnc`]!) : null);
   if (own?.active) {
     if (own.method === 'connect' && own.connectAccountId && secretOf(platform)) {
-      return { account: 'shop', call: { secret: secretOf(platform)!, stripeAccount: own.connectAccountId }, webhookSecret: webhookOf(platform), email: own.email || platform?.email || '' };
+      return { account: 'shop', call: { secret: secretOf(platform)!, stripeAccount: own.connectAccountId }, webhookSecret: webhookOf(platform), email: own.email || platform?.email || '', kioskKey: kioskOf(platform) };
     }
     const secret = secretOf(own);
-    if (own.method === 'keys' && secret) return { account: 'shop', call: { secret }, webhookSecret: webhookOf(own), email: own.email || platform?.email || '' };
+    if (own.method === 'keys' && secret) return { account: 'shop', call: { secret }, webhookSecret: webhookOf(own), email: own.email || platform?.email || '', kioskKey: kioskOf(own) };
   }
   const secret = secretOf(platform);
-  return secret ? { account: 'platform', call: { secret }, webhookSecret: webhookOf(platform), email: platform?.email ?? '' } : null;
+  return secret ? { account: 'platform', call: { secret }, webhookSecret: webhookOf(platform), email: platform?.email ?? '', kioskKey: kioskOf(platform) } : null;
 }
 
 /**
