@@ -98,6 +98,19 @@ powershell -ExecutionPolicy Bypass -File scripts/local-db.ps1
 | `npm run db:migrate` | รัน migration กับ DB ใน `DATABASE_URL` |
 | `npm run db:seed` | สร้าง/เลื่อนขั้นผู้ดูแลแพลตฟอร์มจาก `SEED_ADMIN_*` |
 
+## Branches และขั้นตอนขึ้นระบบ
+
+| Branch | ใช้ทำอะไร |
+|---|---|
+| `main` | **Production**: deploy ขึ้นระบบจริงจาก `main` เท่านั้น |
+| `dev` | รวมงานที่พัฒนาเสร็จแล้ว (deploy ขึ้น staging / Vercel Preview เพื่อทดสอบ) |
+| `feature/…`, `fix/…` | งานแต่ละชิ้น แตกจาก `dev` แล้ว merge กลับเข้า `dev` |
+
+1. แตก branch งานจาก `dev` → พัฒนา (`npm run typecheck`, `npm test`) → merge เข้า `dev`
+2. ทดสอบ `dev` บน staging ร่วมกับตู้ทดสอบ
+3. ผ่านแล้ว merge `dev` → `main` และติด tag เวอร์ชัน ก่อน deploy production (รัน migration ก่อน deploy)
+4. แก้ด่วน: `hotfix/…` จาก `main` → merge เข้า `main` และ `dev`
+
 ## Deploy
 
 ดูขั้นตอนเต็มใน [docs/DEPLOY.md](docs/DEPLOY.md): environment variables ทั้งหมด, ลำดับ migrate และ seed, Stripe webhook, R2, cron เก็บกวาด, `/healthz`, backup และ checklist ก่อนเปิดรับเงินจริง
