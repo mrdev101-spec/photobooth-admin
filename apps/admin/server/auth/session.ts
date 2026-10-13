@@ -3,7 +3,7 @@ import { cache } from 'react';
 import { cookies, headers } from 'next/headers';
 import { and, eq, gt } from 'drizzle-orm';
 import { db } from '@/server/db/client';
-import { userSessions, users, type User } from '@/server/db/schema';
+import { trustedDevices, userSessions, users, type User } from '@/server/db/schema';
 import { newId } from '@/server/lib/ids';
 import { randomToken, sha256Hex } from '@/server/lib/crypto';
 
@@ -82,7 +82,8 @@ export async function destroySession(): Promise<void> {
   jar.delete(SESSION_COOKIE);
 }
 
-/** Signs a user out everywhere (password change / reset / deactivation). */
+/** Signs a user out everywhere (password change / reset / deactivation), remembered browsers too. */
 export async function destroyAllSessions(userId: string): Promise<void> {
   await db().delete(userSessions).where(eq(userSessions.userId, userId));
+  await db().delete(trustedDevices).where(eq(trustedDevices.userId, userId));
 }

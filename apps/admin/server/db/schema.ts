@@ -100,6 +100,39 @@ export const userSessions = mysqlTable(
   (t) => [uniqueIndex('user_sessions_token_uq').on(t.tokenHash), index('user_sessions_user_idx').on(t.userId)]
 );
 
+/**
+ * Email sign-in codes (2FA for the platform team and shop owners). The browser holds a random
+ * challenge token (cookie); only hashes of the token and the 6-digit code are stored.
+ */
+export const loginChallenges = mysqlTable(
+  'login_challenges',
+  {
+    id: id('id').primaryKey(),
+    tokenHash: char('token_hash', { length: 64 }).notNull(),
+    userId: id('user_id').notNull(),
+    codeHash: char('code_hash', { length: 64 }).notNull(),
+    attempts: int('attempts').notNull().default(0),
+    sentCount: int('sent_count').notNull().default(1),
+    expiresAt: datetime('expires_at', { mode: 'date', fsp: 3 }).notNull(),
+    createdAt: createdAt()
+  },
+  (t) => [uniqueIndex('login_challenges_token_uq').on(t.tokenHash), index('login_challenges_user_idx').on(t.userId)]
+);
+
+/** Browsers a user chose to remember after an email code (30 days, no code needed). */
+export const trustedDevices = mysqlTable(
+  'trusted_devices',
+  {
+    id: id('id').primaryKey(),
+    tokenHash: char('token_hash', { length: 64 }).notNull(),
+    userId: id('user_id').notNull(),
+    userAgent: varchar('user_agent', { length: 255 }),
+    expiresAt: datetime('expires_at', { mode: 'date', fsp: 3 }).notNull(),
+    createdAt: createdAt()
+  },
+  (t) => [uniqueIndex('trusted_devices_token_uq').on(t.tokenHash), index('trusted_devices_user_idx').on(t.userId)]
+);
+
 export const memberships = mysqlTable(
   'memberships',
   {

@@ -23,6 +23,7 @@
 | `DATABASE_SSL` | ✅ (`true`) | ถ้าไม่ใช่ `true` ระบบจะเตือนตอนเริ่ม |
 | `MASTER_KEY` | ✅ | 32 bytes แบบ base64 ใช้เข้ารหัสกุญแจ Stripe / R2 / AI ใน DB **เก็บสำเนาไว้ที่ปลอดภัย (ดูข้อ 7)** |
 | `ADMIN_PUBLIC_URL` | ✅ | `https://admin.โดเมน` ใช้สร้าง webhook, ลิงก์ asset ของตู้ และลิงก์อัปโหลดจากมือถือ |
+| `RESEND_API_KEY`, `EMAIL_FROM` | ✅ | ส่งรหัสเข้าสู่ระบบทางอีเมล (2FA ของทีมแพลตฟอร์มและเจ้าของร้าน) ผ่าน [Resend](https://resend.com) ต้องยืนยันโดเมนผู้ส่งก่อน เช่น `EMAIL_FROM="SCLUO-DIO <no-reply@โดเมน>"` |
 | `CRON_SECRET` | ✅ | สตริงสุ่ม ถ้าไม่ตั้ง cron เก็บกวาดจะปิดอยู่ |
 | `PLATFORM_R2_ACCOUNT_ID`, `PLATFORM_R2_ENDPOINT`, `PLATFORM_R2_BUCKET`, `PLATFORM_R2_ACCESS_KEY_ID`, `PLATFORM_R2_SECRET_ACCESS_KEY`, `PLATFORM_R2_PUBLIC_URL` | ✅ | bucket ของบริษัทสำหรับไฟล์เทมเพลต (แยกจาก bucket รูปลูกค้า) |
 | `DATABASE_POOL_SIZE` | – | ค่าเริ่มต้น 5 ต่อ instance |

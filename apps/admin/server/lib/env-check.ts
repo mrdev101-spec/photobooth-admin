@@ -10,6 +10,8 @@ export function checkProductionEnv(env: Record<string, string | undefined>): { e
   if (!has('ADMIN_PUBLIC_URL')) errors.push('ADMIN_PUBLIC_URL is not set (Stripe webhooks, kiosk asset and phone upload links are built from it)');
   else if (!env.ADMIN_PUBLIC_URL!.startsWith('https://')) errors.push('ADMIN_PUBLIC_URL must be an https URL');
 
+  if (!has('RESEND_API_KEY') || !has('EMAIL_FROM')) errors.push('RESEND_API_KEY and EMAIL_FROM are required: platform admins and shop owners sign in with an email code');
+
   if (env.DATABASE_SSL !== 'true') warnings.push('DATABASE_SSL is not "true": only acceptable when the database is on the same private network');
   if (!has('CRON_SECRET')) warnings.push('CRON_SECRET is not set: /internal/cron/housekeeping is off (stuck AI jobs, payable expired QR codes and old sessions are not cleaned)');
   const r2 = ['PLATFORM_R2_ACCOUNT_ID', 'PLATFORM_R2_BUCKET', 'PLATFORM_R2_ACCESS_KEY_ID', 'PLATFORM_R2_SECRET_ACCESS_KEY', 'PLATFORM_R2_PUBLIC_URL'];

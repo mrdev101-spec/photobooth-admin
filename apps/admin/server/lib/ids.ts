@@ -1,6 +1,6 @@
 import { ulid } from 'ulid';
 
-export type IdPrefix = 'org' | 'usr' | 'ses' | 'brn' | 'aud' | 'ksk' | 'kpc' | 'ktk' | 'ack' | 'ord' | 'ofl' | 'tpv' | 'evt' | 'pjb' | 'cmd' | 'aij' | 'pay' | 'phu';
+export type IdPrefix = 'org' | 'usr' | 'ses' | 'brn' | 'aud' | 'ksk' | 'kpc' | 'ktk' | 'ack' | 'ord' | 'ofl' | 'tpv' | 'evt' | 'pjb' | 'cmd' | 'aij' | 'pay' | 'phu' | 'lch' | 'tdv';
 
 /** Sortable, prefixed ids, e.g. `org_01J9Z3…` (fits VARCHAR(32)). */
 export function newId(prefix: IdPrefix): string {

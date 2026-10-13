@@ -7,6 +7,8 @@ const ok = {
   ADMIN_PUBLIC_URL: 'https://admin.example.com',
   DATABASE_SSL: 'true',
   CRON_SECRET: 's',
+  RESEND_API_KEY: 're_x',
+  EMAIL_FROM: 'SCLUO-DIO <no-reply@example.com>',
   PLATFORM_R2_ACCOUNT_ID: 'a', PLATFORM_R2_BUCKET: 'b', PLATFORM_R2_ACCESS_KEY_ID: 'c', PLATFORM_R2_SECRET_ACCESS_KEY: 'd', PLATFORM_R2_PUBLIC_URL: 'https://cdn'
 };
 
