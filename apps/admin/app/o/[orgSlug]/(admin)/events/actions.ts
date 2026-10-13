@@ -48,7 +48,8 @@ export async function createEventAction(orgSlug: string, _: ActionState, form: F
     id = await createEvent(ctx, EventInfoInput.parse(formObject(form)));
     return { ok: true };
   });
-  if (r.ok && id) redirect(`/o/${orgSlug}/events/${id}`);
+  // A new event opens in the step-by-step setup
+  if (r.ok && id) redirect(`/o/${orgSlug}/events/${id}/setup`);
   return r;
 }
 

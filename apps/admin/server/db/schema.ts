@@ -214,6 +214,13 @@ export const kiosks = mysqlTable(
     lastSeenAt: datetime('last_seen_at', { mode: 'date', fsp: 3 }),
     pairedAt: datetime('paired_at', { mode: 'date', fsp: 3 }),
     revokedAt: datetime('revoked_at', { mode: 'date', fsp: 3 }),
+    /**
+     * Retired ("ยกเลิกตู้"): unpaired for good and kept as history (its sales, settings and audit
+     * stay); hidden from the kiosk lists, the Event Console and the quota. null = in use.
+     */
+    archivedAt: datetime('archived_at', { mode: 'date', fsp: 3 }),
+    archivedReason: varchar('archived_reason', { length: 255 }),
+    archivedBy: id('archived_by'),
     createdAt: createdAt(),
     updatedAt: updatedAt()
   },
@@ -616,6 +623,38 @@ export const aiJobFiles = mysqlTable(
     createdAt: createdAt()
   },
   (t) => [primaryKey({ columns: [t.jobId, t.role] })]
+);
+
+/**
+ * Photos a customer sends from a phone to a kiosk (QR → /u/{token}). Kept only until the kiosk
+ * takes them (then deleted); a session lasts 10 minutes. The token is stored hashed.
+ */
+export const phoneUploads = mysqlTable(
+  'phone_uploads',
+  {
+    id: id().primaryKey(),
+    orgId: id('org_id').notNull(),
+    kioskRowId: id('kiosk_row_id').notNull(),
+    tokenHash: char('token_hash', { length: 64 }).notNull(),
+    count: int('count').notNull(),
+    received: int('received').notNull().default(0),
+    status: mysqlEnum('status', ['waiting', 'uploading', 'ready', 'taken', 'cancelled']).notNull().default('waiting'),
+    expiresAt: datetime('expires_at', { mode: 'date', fsp: 3 }).notNull(),
+    createdAt: createdAt()
+  },
+  (t) => [uniqueIndex('phone_uploads_token_uq').on(t.tokenHash), index('phone_uploads_expires_idx').on(t.expiresAt)]
+);
+
+export const phoneUploadFiles = mysqlTable(
+  'phone_upload_files',
+  {
+    uploadId: id('upload_id').notNull(),
+    idx: int('idx').notNull(),
+    mimeType: varchar('mime_type', { length: 20 }).notNull(),
+    bytes: mediumBlob('bytes').notNull(),
+    createdAt: createdAt()
+  },
+  (t) => [primaryKey({ columns: [t.uploadId, t.idx] })]
 );
 
 /** Images customers received per customer per month (the quota counter). */

@@ -12,7 +12,8 @@ const POLL_MS = 3000;
  * Shows a one-time pairing code with its countdown and watches for the kiosk to pair.
  * The code only lives in this component's state: it is never stored or shown again.
  */
-export function PairingPanel({ orgSlug, kioskRowId, autoStart, kind = 'pair' }: { orgSlug: string; kioskRowId: string; autoStart: boolean; kind?: 'pair' | 'key' }) {
+/** `publicUrl`: the Admin's address for kiosks (ADMIN_PUBLIC_URL); else the address in this browser tab. */
+export function PairingPanel({ orgSlug, kioskRowId, autoStart, kind = 'pair', publicUrl }: { orgSlug: string; kioskRowId: string; autoStart: boolean; kind?: 'pair' | 'key'; publicUrl?: string }) {
   const isKey = kind === 'key';
   const [copied, setCopied] = useState(false);
   const router = useRouter();
@@ -23,7 +24,7 @@ export function PairingPanel({ orgSlug, kioskRowId, autoStart, kind = 'pair' }: 
   const [pending, startTransition] = useTransition();
   const started = useRef(false);
   const [origin, setOrigin] = useState('');
-  useEffect(() => setOrigin(window.location.origin), []);
+  useEffect(() => setOrigin(publicUrl || window.location.origin), [publicUrl]);
 
   const generate = () =>
     startTransition(async () => {

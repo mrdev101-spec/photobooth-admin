@@ -95,3 +95,14 @@ export async function moveKiosk(ctx: PlatformContext, toOrgId: string, input: z.
   await audit({ user: ctx.user, orgId: target.id }, entry);
   return { moved: true, orgKind: target.kind };
 }
+
+/** Every customer's active branches, for "มอบให้ร้าน" / "เพิ่มตู้ให้ร้าน" pickers (value orgId|branchId). */
+export async function shopBranchOptions() {
+  const rows = await db()
+    .select({ orgId: organizations.id, orgName: organizations.name, orgStatus: organizations.status, branchId: branches.id, branchName: branches.name })
+    .from(organizations)
+    .innerJoin(branches, and(eq(branches.orgId, organizations.id), eq(branches.isActive, true)))
+    .where(and(eq(organizations.kind, 'customer'), isNull(organizations.deletedAt)))
+    .orderBy(organizations.name, branches.name);
+  return rows.map((r) => ({ value: `${r.orgId}|${r.branchId}`, orgId: r.orgId, label: `${r.orgName} › ${r.branchName}${r.orgStatus === 'active' ? '' : ' (ระงับ)'}` }));
+}

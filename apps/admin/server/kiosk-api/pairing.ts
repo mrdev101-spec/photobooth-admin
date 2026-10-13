@@ -10,6 +10,7 @@ import { newId } from '@/server/lib/ids';
 import { isDuplicateKey } from '@/server/lib/errors';
 import { rateLimit } from '@/server/lib/rate-limit';
 import { KioskApiError } from './http';
+import type { KioskAuth } from './auth';
 
 // Codes are 8 chars over 30 symbols (~6.5e11); this cap makes guessing hopeless
 const PAIR_ATTEMPTS_PER_IP = 20;
@@ -92,4 +93,32 @@ export async function pairKiosk(input: z.output<typeof PairRequestSchema>, ip: s
     : null;
 
   return { deviceToken: token, kioskId: input.kioskId, name: found.kiosk.name, org: { name: found.org.name }, branch, revision };
+}
+
+/**
+ * The kiosk unpaired itself (Config › ยกเลิกการเชื่อมต่อ): the same as the Admin's unpair — the
+ * token stops working and its Kiosk ID is released (kept in former_kiosk_id), so the machine can
+ * be registered again with a new pairing code or key, to this kiosk or another one.
+ */
+export async function unpairSelf(auth: KioskAuth): Promise<void> {
+  const k = auth.kiosk;
+  const now = new Date();
+  await db().transaction(async (tx) => {
+    await tx.update(kioskTokens).set({ revokedAt: now }).where(and(eq(kioskTokens.kioskRowId, k.id), isNull(kioskTokens.revokedAt)));
+    await tx.update(kioskPairCodes).set({ expiresAt: now }).where(and(eq(kioskPairCodes.kioskRowId, k.id), isNull(kioskPairCodes.usedAt)));
+    await tx
+      .update(kiosks)
+      .set({
+        status: 'revoked',
+        kioskId: null,
+        formerKioskId: k.kioskId ?? k.formerKioskId,
+        revokedAt: now,
+        fingerprintMismatch: false,
+        appliedRevision: null,
+        manifestRevision: null,
+        emergency: null,
+        maintenance: false
+      })
+      .where(eq(kiosks.id, k.id));
+  });
 }

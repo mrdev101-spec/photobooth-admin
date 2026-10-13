@@ -195,6 +195,15 @@ export const KioskSettingsBaseSchema = z.object({
       enabled: z.boolean(),
       retentionDays: z.number().int().min(1).max(90)
     }),
+    /** Customers may send their own photos from a phone (QR) instead of shooting (Photo 4x6, Classic). */
+    phoneUpload: z.object({ enabled: z.boolean() }),
+    /**
+     * "ดุ๊กดิ๊ก": the customer may switch on a 5-second moving photo while shooting (Photo 4x6,
+     * Classic); the video / GIF go to the download link, the print stays a still.
+     */
+    motion: z.object({ enabled: z.boolean() }),
+    /** "ชูมือเริ่มถ่าย": an open palm held up at the camera starts the countdown (all modes). */
+    gesture: z.object({ palmStart: z.boolean() }),
     idleReturnSec: z.number().int().min(30).max(600),
     adminPin: AdminPinSchema.nullable()
   });
@@ -250,6 +259,9 @@ export function defaultKioskSettings(): KioskSettings {
     payment: { enabled: false, bypass: false, mode: 'test', email: '', qrTimeoutSec: 180 },
     ai: { demoMode: false },
     share: { enabled: false, retentionDays: 7 },
+    phoneUpload: { enabled: false },
+    motion: { enabled: false },
+    gesture: { palmStart: true },
     idleReturnSec: 120,
     adminPin: null
   };

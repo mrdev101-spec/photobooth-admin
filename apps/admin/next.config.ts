@@ -7,7 +7,8 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ['@node-rs/argon2', 'mysql2'],
   poweredByHeader: false,
   // Dev server only: also serve dev assets to http://127.0.0.1:3100 (Next blocks non-localhost dev origins)
-  allowedDevOrigins: ['127.0.0.1'],
+  // DEV_LAN_HOST (e.g. 192.168.1.20): a phone on the same network can open the dev server too
+  allowedDevOrigins: ['127.0.0.1', ...(process.env.DEV_LAN_HOST ? [process.env.DEV_LAN_HOST] : [])],
   experimental: {
     // Central template uploads (overlay PNG up to 8 MB). Note: Vercel caps request bodies at
     // 4.5 MB, so large overlays there need direct-to-R2 uploads (docs §18.7).

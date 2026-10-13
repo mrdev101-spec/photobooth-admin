@@ -2,12 +2,12 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { requireOrg } from '@/server/auth/context';
 import { can } from '@/server/auth/rbac';
-import { canManageFleet, kioskQuotaUsage, listKiosks } from '@/server/services/kiosks';
+import { archivedKioskCount, canManageFleet, kioskQuotaUsage, listKiosks } from '@/server/services/kiosks';
 import { formatQuota, isFull } from '@/lib/quota';
 import { listBranches } from '@/server/services/branches';
 import { AutoRefresh } from '@/components/auto-refresh';
 import { ConnectionBadge, modeName } from '@/components/kiosk-badges';
-import { Filter, MonitorSmartphone, Plus } from 'lucide-react';
+import { Archive, Filter, MonitorSmartphone, Plus } from 'lucide-react';
 import { Badge, EmptyState, PageHeader, Select, Table, Td, Th, buttonClass } from '@/components/ui';
 import { connectionOf, kioskIssues, type Connection } from '@/lib/kiosk-status';
 import { formatRelative } from '@/lib/format';
@@ -39,10 +39,11 @@ export default async function KiosksPage({
   const { orgSlug } = await params;
   const sp = await searchParams;
   const ctx = await requireOrg(orgSlug, 'kiosk.view');
-  const [rows, branches, quota] = await Promise.all([
+  const [rows, branches, quota, archivedCount] = await Promise.all([
     listKiosks(ctx, { branchId: sp.branch || undefined, includeRevoked: sp.revoked === '1' }),
     listBranches(ctx),
-    kioskQuotaUsage(ctx)
+    kioskQuotaUsage(ctx),
+    archivedKioskCount(ctx)
   ]);
   const now = Date.now();
   // The mode the Admin last sent each kiosk, and whether this user may switch it
@@ -78,16 +79,23 @@ export default async function KiosksPage({
         title="ตู้"
         description={`ใช้ ${formatQuota(quota.used, quota.quota)} ตู้ • อัปเดตสถานะอัตโนมัติ`}
         actions={
-          canManage ? (
-            !isFull(quota.used, quota.quota) ? (
-              <Link href={`${base}/new`} className={buttonClass()}>
-                <Plus className="size-5" aria-hidden />
-                เพิ่มตู้
-              </Link>
-            ) : (
-              <span className="text-sm text-ink-500">ตู้ครบโควตาแล้ว</span>
-            )
-          ) : null
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Retired kiosks ("ยกเลิกตู้"), kept as history */}
+            <Link href={`${base}/history`} className={buttonClass('secondary')}>
+              <Archive className="size-5" aria-hidden />
+              ประวัติตู้ที่ยกเลิก{archivedCount ? ` (${archivedCount})` : ''}
+            </Link>
+            {canManage ? (
+              !isFull(quota.used, quota.quota) ? (
+                <Link href={`${base}/new`} className={buttonClass()}>
+                  <Plus className="size-5" aria-hidden />
+                  เพิ่มตู้
+                </Link>
+              ) : (
+                <span className="text-sm text-ink-500">ตู้ครบโควตาแล้ว</span>
+              )
+            ) : null}
+          </div>
         }
       />
 

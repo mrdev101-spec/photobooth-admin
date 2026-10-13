@@ -9,7 +9,7 @@ import { hasStorage } from '@/server/services/storage';
 import { AppError } from '@/server/lib/errors';
 import { resolvePermissions } from '@/lib/config-permissions';
 import { ActionForm, FormField, SubmitButton } from '@/components/form';
-import { Badge, Card, Input, Notice, PageHeader } from '@/components/ui';
+import { Badge, Card, Input, Notice, PageHeader, buttonClass } from '@/components/ui';
 import { formatDateTime } from '@/lib/format';
 import { ConfigEditor } from '../../kiosks/[id]/config/config-editor';
 import { editorCatalog } from '../../kiosks/[id]/config/editor-catalog';
@@ -48,7 +48,16 @@ export default async function EventPage({ params }: { params: Promise<{ orgSlug:
           </Link>
         }
         description={<>แก้ล่าสุด {formatDateTime(event.updatedAt)}</>}
-        actions={event.isActive ? <Badge tone="success" dot>เปิดอยู่</Badge> : <Badge dot>ปิดแล้ว</Badge>}
+        actions={
+          <span className="flex items-center gap-3">
+            {canEdit ? (
+              <Link href={`/o/${ctx.org.slug}/events/${event.id}/setup`} className={buttonClass('outline', 'sm')}>
+                ตัวช่วยตั้งงานทีละขั้น
+              </Link>
+            ) : null}
+            {event.isActive ? <Badge tone="success" dot>เปิดอยู่</Badge> : <Badge dot>ปิดแล้ว</Badge>}
+          </span>
+        }
       />
 
       <div className="mb-6 flex max-w-5xl flex-col gap-3">

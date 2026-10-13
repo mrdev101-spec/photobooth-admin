@@ -6,10 +6,12 @@ import { getOrgContext } from '@/server/auth/context';
 import {
   KioskInput,
   acceptFingerprint,
+  archiveKiosk,
   createKiosk,
   createPairCode,
   deletePendingKiosk,
   kioskPairState,
+  restoreKiosk,
   setMaintenance,
   unpairKiosk,
   updateKiosk
@@ -104,4 +106,28 @@ export async function setKioskModeAction(orgSlug: string, kioskRowId: string, mo
     console.error(err);
     return { ok: false, message: 'เปลี่ยนโหมดไม่สำเร็จ' };
   }
+}
+
+/** "ยกเลิกตู้": unpaired for good and moved to the kiosk history (nothing is deleted). */
+export async function archiveKioskAction(orgSlug: string, id: string, _: ActionState, form: FormData): Promise<ActionState> {
+  const result = await runAction(async () => {
+    const ctx = await getOrgContext(orgSlug);
+    await archiveKiosk(ctx, id, String(form.get('reason') ?? ''));
+    revalidatePath(`/o/${orgSlug}/kiosks`);
+    return { ok: true };
+  });
+  if (result.ok) redirect(`/o/${orgSlug}/kiosks/history?archived=${id}`);
+  return result;
+}
+
+/** Back from the history: in the kiosk list again, waiting for a new pairing code. */
+export async function restoreKioskAction(orgSlug: string, id: string, _: ActionState): Promise<ActionState> {
+  const result = await runAction(async () => {
+    const ctx = await getOrgContext(orgSlug);
+    await restoreKiosk(ctx, id);
+    revalidatePath(`/o/${orgSlug}/kiosks`);
+    return { ok: true };
+  });
+  if (result.ok) redirect(`/o/${orgSlug}/kiosks/${id}`);
+  return result;
 }

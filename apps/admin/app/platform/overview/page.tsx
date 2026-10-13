@@ -80,7 +80,7 @@ export default async function PlatformOverviewPage() {
                 {attention.slice(0, 15).map((a) => (
                   <tr key={a.id} className="hover:bg-ink-50">
                     <Td>
-                      <Link href={`/o/${a.orgSlug}/kiosks/${a.id}`} className="font-semibold text-ink-900 hover:underline">
+                      <Link href={`/platform/kiosks/${a.id}`} className="font-semibold text-ink-900 hover:underline">
                         {a.name}
                       </Link>
                     </Td>

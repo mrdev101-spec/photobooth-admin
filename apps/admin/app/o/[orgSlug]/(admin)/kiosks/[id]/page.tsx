@@ -10,11 +10,11 @@ import { AppError } from '@/server/lib/errors';
 import { AutoRefresh } from '@/components/auto-refresh';
 import { ActionForm, FormField, SubmitButton } from '@/components/form';
 import { ConnectionBadge, modeName } from '@/components/kiosk-badges';
-import { Activity, ChevronLeft, Cpu, Pencil, Printer, SlidersHorizontal, Wrench } from 'lucide-react';
+import { Activity, Archive, ChevronLeft, Cpu, Pencil, Printer, SlidersHorizontal, Wrench } from 'lucide-react';
 import { Badge, Card, Input, Notice, PageHeader, Select } from '@/components/ui';
 import { connectionOf, kioskIssues } from '@/lib/kiosk-status';
 import { formatDateTime, formatRelative } from '@/lib/format';
-import { acceptFingerprintAction, deleteKioskAction, setMaintenanceAction, unpairKioskAction, updateKioskAction } from '../actions';
+import { acceptFingerprintAction, archiveKioskAction, deleteKioskAction, restoreKioskAction, setMaintenanceAction, unpairKioskAction, updateKioskAction } from '../actions';
 import { PairingPanel } from './pairing-panel';
 import { KioskTabs } from './kiosk-tabs';
 
@@ -55,21 +55,23 @@ export default async function KioskPage({ params, searchParams }: { params: Prom
   const canFleet = canManage && canManageFleet(ctx);
   const branches = canManage ? (await listBranches(ctx)).filter((b) => b.isActive || b.id === k.branchId) : [];
   const base = `/o/${ctx.org.slug}/kiosks`;
+  // Retired ("ยกเลิกตู้"): kept as history, read-only here
+  const archived = !!k.archivedAt;
 
   return (
     <>
       {k.status === 'active' ? <AutoRefresh seconds={20} /> : null}
       <PageHeader
         breadcrumb={
-          <Link href={base} className="inline-flex items-center gap-1 hover:text-ink-900">
+          <Link href={archived ? `${base}/history` : base} className="inline-flex items-center gap-1 hover:text-ink-900">
             <ChevronLeft className="size-4" aria-hidden />
-            ตู้ทั้งหมด
+            {archived ? 'ประวัติตู้ที่ยกเลิก' : 'ตู้ทั้งหมด'}
           </Link>
         }
         title={
           <span className="flex flex-wrap items-center gap-3">
             {k.name}
-            <ConnectionBadge connection={connection} />
+            {archived ? <Badge tone="neutral">ยกเลิกแล้ว • เก็บเป็นประวัติ</Badge> : <ConnectionBadge connection={connection} />}
           </span>
         }
         description={`${k.kioskId ?? k.formerKioskId ?? 'ยังไม่จับคู่'} · ${branchName ?? 'ไม่มีสาขา'}`}
@@ -77,7 +79,21 @@ export default async function KioskPage({ params, searchParams }: { params: Prom
       <KioskTabs base={`${base}/${k.id}`} active="overview" paired={k.currentRevision > 0} />
 
       <div className="flex flex-col gap-6">
-        {(k.status === 'pending' || k.status === 'revoked') && canFleet ? <PairingPanel orgSlug={ctx.org.slug} kioskRowId={k.id} autoStart={pair === '1' && k.status === 'pending'} /> : null}
+        {archived ? (
+          <Notice tone="warn" title={`ยกเลิกตู้นี้แล้วเมื่อ ${formatDateTime(k.archivedAt!)}`}>
+            {k.archivedReason ? <>เหตุผล: {k.archivedReason} • </> : null}
+            เก็บไว้เป็นประวัติ: ยอดขาย ออเดอร์ การตั้งค่า และ Audit log ของตู้นี้ยังดูได้ครบ • ไม่นับในโควตาตู้ และไม่แสดงในรายการตู้หรือ Event Console
+            {canFleet ? (
+              <div className="mt-3">
+                <ActionForm action={restoreKioskAction.bind(null, orgSlug, k.id)} confirm={`นำตู้ "${k.name}" กลับมาใช้? ตู้จะกลับไปอยู่ในรายการตู้ และต้องจับคู่ใหม่ (นับในโควตาตู้)`}>
+                  <SubmitButton size="sm" variant="secondary">นำกลับมาใช้</SubmitButton>
+                </ActionForm>
+              </div>
+            ) : null}
+          </Notice>
+        ) : null}
+
+        {!archived && (k.status === 'pending' || k.status === 'revoked') && canFleet ? <PairingPanel orgSlug={ctx.org.slug} kioskRowId={k.id} autoStart={pair === '1' && k.status === 'pending'} publicUrl={process.env.ADMIN_PUBLIC_URL?.replace(/\/+$/, '')} /> : null}
 
         {k.status === 'disabled' ? (
           <Notice tone="danger" title="ตู้นี้ถูกปิดใช้งานโดยผู้ให้บริการ">
@@ -85,7 +101,7 @@ export default async function KioskPage({ params, searchParams }: { params: Prom
           </Notice>
         ) : null}
 
-        {(k.status === 'pending' || k.status === 'revoked') && !canFleet ? (
+        {!archived && (k.status === 'pending' || k.status === 'revoked') && !canFleet ? (
           <Notice tone="info">ผู้ให้บริการจะจับคู่และติดตั้งตู้นี้ให้ ตู้จะแสดงสถานะเมื่อเชื่อมต่อแล้ว</Notice>
         ) : null}
 
@@ -239,7 +255,7 @@ export default async function KioskPage({ params, searchParams }: { params: Prom
           </Card>
         ) : null}
 
-        {(canCommand && k.status === 'active') || canFleet ? (
+        {!archived && ((canCommand && k.status === 'active') || canFleet) ? (
           <Card title="การจัดการ" icon={<Wrench aria-hidden />}>
             <div className="flex flex-wrap gap-3">
               {canCommand && k.status === 'active' ? (
@@ -261,6 +277,23 @@ export default async function KioskPage({ params, searchParams }: { params: Prom
                 </ActionForm>
               ) : null}
             </div>
+            {canFleet ? (
+              <div className="mt-5 border-t border-ink-100 pt-4">
+                <p className="flex items-center gap-2 text-sm font-semibold text-ink-900">
+                  <Archive className="size-4" aria-hidden />
+                  ยกเลิกตู้ (เก็บเป็นประวัติ)
+                </p>
+                <p className="mt-1 text-sm text-ink-500">
+                  เลิกใช้ตู้นี้: ตัดการเชื่อมต่อ (ตู้ล็อก) และย้ายไปที่ &quot;ประวัติตู้ที่ยกเลิก&quot; • ข้อมูลไม่ถูกลบ ยอดขาย ออเดอร์ และการตั้งค่ายังดูย้อนหลังได้ • ไม่นับในโควตาตู้ • นำกลับมาใช้ได้
+                </p>
+                <ActionForm action={archiveKioskAction.bind(null, orgSlug, k.id)} confirm={`ยกเลิกตู้ "${k.name}"? ตู้จะถูกตัดการเชื่อมต่อและย้ายไปเก็บในประวัติ`} className="mt-3 flex flex-wrap items-end gap-3">
+                  <FormField label="เหตุผล (ไม่บังคับ)" name="reason">
+                    <Input id="reason" name="reason" maxLength={255} placeholder="เช่น เครื่องเสีย ย้ายไปสาขาอื่น จบสัญญาเช่า" className="min-w-72" />
+                  </FormField>
+                  <SubmitButton variant="danger">ยกเลิกตู้</SubmitButton>
+                </ActionForm>
+              </div>
+            ) : null}
           </Card>
         ) : null}
       </div>

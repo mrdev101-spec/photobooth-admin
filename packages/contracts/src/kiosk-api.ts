@@ -250,3 +250,27 @@ export interface KioskPaymentStatus {
   account: 'platform' | 'shop' | null;
   reason: 'disabled' | 'live_not_allowed' | 'no_account' | 'no_email' | null;
 }
+
+// ─── Photos from the customer's phone (POST /kiosk/uploads, GET /kiosk/uploads/{id}) ───
+
+export const PHONE_UPLOAD_MAX_PHOTOS = 4;
+export const PhoneUploadRequestSchema = z.object({ count: z.number().int().min(1).max(PHONE_UPLOAD_MAX_PHOTOS) });
+export type PhoneUploadRequest = z.infer<typeof PhoneUploadRequestSchema>;
+
+export interface PhoneUploadSession {
+  id: string;
+  /** The page the customer's phone opens (the QR). */
+  url: string;
+  count: number;
+  expiresAt: string;
+}
+
+/**
+ * When `ready`, the kiosk fetches GET /kiosk/uploads/{id}/photos/{i} (the image bytes, one per
+ * request so no response is large), then DELETE /kiosk/uploads/{id} removes them here.
+ */
+export interface PhoneUploadState {
+  status: 'waiting' | 'uploading' | 'ready' | 'taken' | 'cancelled' | 'expired';
+  received: number;
+  count: number;
+}

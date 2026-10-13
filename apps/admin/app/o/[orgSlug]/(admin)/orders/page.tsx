@@ -40,7 +40,7 @@ export default async function OrdersPage({
 
   const [rows, kiosks, summary] = await Promise.all([
     listOrders(ctx, { from: range.from, to: range.to, kioskRowId: sp.kiosk || undefined, status: (status || undefined) as never, fulfillment, limit: 500 }),
-    listKiosks(ctx, { includeRevoked: true }),
+    listKiosks(ctx, { includeRevoked: true, includeArchived: true }),
     canReport ? salesSummary(ctx, range.from, range.to) : Promise.resolve(null)
   ]);
   const base = `/o/${ctx.org.slug}/orders`;

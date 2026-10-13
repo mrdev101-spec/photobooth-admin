@@ -174,7 +174,7 @@ export default async function TemplateDetailPage({ params }: { params: Promise<{
               {kiosks.map((k) => (
                 <tr key={k.kioskRowId} className="hover:bg-ink-50">
                   <Td>
-                    <Link href={`/platform/organizations/${k.orgId}/kiosks`} className="font-semibold text-ink-900 hover:text-primary-700">
+                    <Link href={`/platform/kiosks/${k.kioskRowId}`} className="font-semibold text-ink-900 hover:text-primary-700">
                       {k.orgName}
                     </Link>
                   </Td>

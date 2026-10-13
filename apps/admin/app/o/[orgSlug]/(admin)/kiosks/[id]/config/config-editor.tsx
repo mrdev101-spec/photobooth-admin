@@ -1,9 +1,9 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { createContext, useContext, useMemo, useState, useTransition, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, useTransition, type ReactNode } from 'react';
 import clsx from 'clsx';
-import { Layers, Link2, Lock, BadgeCheck, Download, Frame, IdCard, LayoutGrid, Music, Palette, Printer, QrCode, ReceiptText, Ruler, ShoppingBag, Sparkles, Timer, Type } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Search, X, Layers, Link2, Lock, BadgeCheck, Download, Frame, Hand, IdCard, LayoutGrid, Music, Palette, Printer, QrCode, ReceiptText, Ruler, ShoppingBag, Smartphone, Sparkles, Timer, Type } from 'lucide-react';
 import { DecorTextEditor } from '@/components/decor-text-editor';
 import { SheetLayoutEditor } from '@/components/sheet-layout-editor';
 import {
@@ -20,6 +20,7 @@ import { buttonClass } from '@/components/ui';
 import { saveConfigAction, type SaveConfigResult } from './actions';
 import { CONFIG_SECTIONS, DEFAULT_CONFIG_PERMISSIONS, type ConfigPermissions, type ConfigSectionId, type PermissionLevel } from '@/lib/config-permissions';
 import { ALWAYS_OWN, normalizeOwnSections } from '@/lib/config-layers';
+import { diffSettings } from '@/lib/settings-diff';
 
 export type EditableSettings = Omit<KioskSettings, 'adminPin'>;
 type PinChange = { action: 'keep' } | { action: 'clear' } | { action: 'set'; pin: string };
@@ -71,6 +72,12 @@ interface Props {
   layerOwners?: Record<string, string[]>;
   /** ค่ากลาง / งาน: make those kiosks follow this layer again for one section. */
   followAction?: (section: string) => Promise<{ ok: boolean; message: string }>;
+  /** 'wizard' = new-event setup step by step (presets only); default = summary cards + side panel. */
+  variant?: 'cards' | 'wizard';
+  /** Wizard: settings to start from ("copy from an earlier event"). */
+  copySources?: { id: string; label: string; settings: EditableSettings }[];
+  /** Wizard: where to go once saved. */
+  doneHref?: string;
 }
 
 type CatalogEntry = { id: string; name: string; desc?: string; image?: string };
@@ -178,52 +185,262 @@ function Gate({ id, children }: { id: ConfigSectionId; children: ReactNode }) {
   );
 }
 
-// ─── small immutable path setter ────────────────────────────────────────────
-function setIn<T>(obj: T, path: string, value: unknown): T {
-  const [head, ...rest] = path.split('.');
-  const src = obj as Record<string, unknown>;
-  return { ...src, [head!]: rest.length ? setIn(src[head!], rest.join('.'), value) : value } as T;
+// ─── layout: tabs of groups, collapsible sections with a one-line summary ───
+const GROUPS = [
+  { id: 'event', label: 'หน้างานและแบรนด์' },
+  { id: 'sales', label: 'สินค้าและราคา' },
+  { id: 'frames', label: 'กรอบภาพ' },
+  { id: 'output', label: 'พิมพ์และรับภาพ' },
+  { id: 'system', label: 'ระบบตู้' }
+] as const;
+type GroupId = (typeof GROUPS)[number]['id'];
+
+/** Each section (by title): its tab, the settings paths it edits (changes / errors) and search words. */
+const SECTION_META: Record<string, { group: GroupId; paths: string[]; keywords?: string; modes?: string[]; kioskOnly?: boolean }> = {
+  'โหมดตู้': { group: 'event', paths: ['appMode'], keywords: 'classic ai photo จุดรับรูป' },
+  'แบรนด์และธีมงาน': { group: 'event', paths: ['brand', 'event', 'attract'], keywords: 'ชื่องาน สี วันที่ ธีม แบรนด์ หัวข้อ' },
+  'ข้อความตกแต่ง': { group: 'event', paths: ['decor'], keywords: 'ฟอนต์ ข้อความ กรอบ', modes: ['photo'] },
+  'เสียงและเพลง': { group: 'event', paths: ['sound'], keywords: 'เสียง เพลง ความดัง', modes: ['photo'] },
+  'สินค้าและราคา (Photo 4x6)': { group: 'sales', paths: ['products.photo', 'products.badge', 'products.bundle', 'photoFulfillment'], keywords: 'ราคา ภาพ เข็มกลัด จุดรับรูป', modes: ['photo'] },
+  'ราคา Classic Receipt': { group: 'sales', paths: ['products.classic', 'templates.classic'], keywords: 'ราคา ใบเสร็จ แบบ', modes: ['classic'] },
+  'AI Studio': { group: 'sales', paths: ['products.ai', 'ai', 'templates.aiScenes'], keywords: 'ราคา ฉาก สาธิต', modes: ['ai'] },
+  'การรับเงิน': { group: 'sales', paths: ['payment'], keywords: 'จ่าย promptpay stripe ฟรี ราคา เงิน' },
+  'กรอบภาพ 4x6': { group: 'frames', paths: ['templates.photoLayouts', 'templates.photoDefaultLayout'], keywords: 'template กรอบ', modes: ['photo'] },
+  'เข็มกลัด': { group: 'frames', paths: ['badge', 'templates.badgeFrames', 'templates.badgeDefaultFrame'], keywords: 'ขนาด กรอบ template', modes: ['photo'] },
+  'การพิมพ์': { group: 'output', paths: ['print'], keywords: 'ใบคิว คิว เครื่องพิมพ์' },
+  'กระดาษ': { group: 'output', paths: ['paper'], keywords: 'a4 a5 4x6 layout แผ่น เครื่องพิมพ์ 58 80', modes: ['photo', 'pickup', 'classic', 'ai'] },
+  'ดาวน์โหลดภาพ (QR)': { group: 'output', paths: ['share'], keywords: 'qr ดาวน์โหลด r2' },
+  'รูปจากมือถือ': { group: 'output', paths: ['phoneUpload'], keywords: 'qr มือถือ อัปโหลด', modes: ['photo', 'classic'] },
+  'ชูมือเริ่มถ่าย': { group: 'output', paths: ['gesture'], keywords: 'มือ ฝ่ามือ gesture ท่าทาง เริ่มถ่าย hand palm' },
+  'ภาพเคลื่อนไหว (ดุ๊กดิ๊ก)': { group: 'output', paths: ['motion'], keywords: 'ดุ๊กดิ๊ก gif ถ่ายรัว เคลื่อนไหว boomerang', modes: ['photo', 'classic'] },
+  'ตัวตนตู้': { group: 'system', paths: ['identity'], keywords: 'ชื่อตู้ สถานที่', kioskOnly: true },
+  'พฤติกรรมตู้': { group: 'system', paths: ['idleReturnSec', '$pin'], keywords: 'pin รหัส หน้าแรก เวลา' }
+};
+
+interface EditorView {
+  variant: 'cards' | 'wizard';
+  query: string;
+  /** Cards: the section open in the side panel. */
+  active: string | null;
+  setActive: (title: string | null) => void;
+  /** Wizard: the sections of the current step. */
+  stepTitles: string[];
+  summary: (title: string) => string;
+  changed: (paths: string[]) => boolean;
+  failed: (paths: string[]) => boolean;
+  /** The kiosk preview beside sections people can see on the kiosk (brand, frames, decor). */
+  preview: (title: string) => ReactNode;
+}
+const ViewContext = createContext<EditorView | null>(null);
+
+const META_ORDER = Object.keys(SECTION_META);
+const orderOf = (title: string) => {
+  const m = SECTION_META[title];
+  return m ? GROUPS.findIndex((g) => g.id === m.group) * 100 + META_ORDER.indexOf(title) + 1 : 0;
+};
+
+/** Steps of the new-event wizard (sections by title; the last step reviews and saves). */
+const WIZARD_STEPS: { label: string; intro: string; titles: string[]; preview?: boolean }[] = [
+  { label: 'โหมดตู้', intro: 'ตู้ในงานนี้ใช้โหมดไหน', titles: ['โหมดตู้'] },
+  { label: 'ชื่องานและแบรนด์', intro: 'ชื่องาน วันที่ และสีที่ลูกค้าเห็นบนจอและบนภาพ', titles: ['แบรนด์และธีมงาน'], preview: true },
+  { label: 'สินค้าและราคา', intro: 'ขายอะไรบ้าง ราคาเท่าไร และเก็บเงินอย่างไร', titles: ['สินค้าและราคา (Photo 4x6)', 'ราคา Classic Receipt', 'AI Studio', 'การรับเงิน'] },
+  { label: 'กรอบภาพ', intro: 'กรอบที่ลูกค้าเลือกได้ในงานนี้', titles: ['กรอบภาพ 4x6', 'เข็มกลัด'], preview: true },
+  { label: 'พิมพ์และรับภาพ', intro: 'พิมพ์ที่ตู้ หรือให้ลูกค้ารับภาพทาง QR', titles: ['การพิมพ์', 'กระดาษ', 'ดาวน์โหลดภาพ (QR)', 'รูปจากมือถือ'] },
+  { label: 'ตรวจสอบ', intro: 'ตรวจทุกอย่างก่อนบันทึก แก้ได้อีกเสมอที่หน้างาน', titles: [] }
+];
+
+/** Section edit panel (cards layout): slides in from the right; the preview sits beside the fields. */
+function Drawer({ title, hint, icon, badges, preview, onClose, children }: { title: string; hint?: string; icon?: ReactNode; badges?: ReactNode; preview?: ReactNode; onClose: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true" aria-label={title}>
+      <button type="button" aria-label="ปิด" onClick={onClose} className="absolute inset-0 cursor-default bg-ink-900/30" />
+      <div className={clsx('relative flex h-full w-full flex-col bg-canvas shadow-2xl', preview ? 'max-w-6xl' : 'max-w-2xl')}>
+        <header className="flex items-start gap-3 border-b border-ink-200 bg-surface px-6 py-4">
+          {icon ? <span className="mt-1 text-primary-600 [&>svg]:size-5">{icon}</span> : null}
+          <div className="min-w-0 flex-1">
+            <h2 className="text-xl font-bold text-ink-900">{title}</h2>
+            {hint ? <p className="mt-0.5 text-sm text-ink-500">{hint}</p> : null}
+            {badges ? <div className="mt-2 flex flex-wrap items-center gap-2">{badges}</div> : null}
+          </div>
+          <button type="button" onClick={onClose} aria-label="ปิด" className={buttonClass('ghost', 'icon')}>
+            <X aria-hidden />
+          </button>
+        </header>
+        <div className="flex min-h-0 flex-1">
+          <div className="min-w-0 flex-1 overflow-y-auto">{children}</div>
+          {preview ? <aside aria-label="ตัวอย่างที่ตู้" className="hidden w-[380px] shrink-0 overflow-y-auto bg-ink-900 p-6 lg:block">{preview}</aside> : null}
+        </div>
+        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-ink-200 bg-surface px-6 py-3">
+          <span className="text-sm text-ink-500">ค่าที่แก้จะส่งไปตู้เมื่อกด &quot;บันทึกและส่งไปตู้&quot; ด้านล่าง</span>
+          <button type="button" onClick={onClose} className={buttonClass()}>
+            <Check className="size-4" aria-hidden />
+            เสร็จ
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
 }
 
-// ─── field widgets ──────────────────────────────────────────────────────────
+/** Roughly what the kiosk shows with these settings (brand, event text, colour, default frames). */
+function KioskPreview({ s, catalog }: { s: EditableSettings; catalog: EditorCatalog }) {
+  const [view, setView] = useState<'attract' | 'photo' | 'badge'>('attract');
+  const accent = /^#[0-9a-fA-F]{6}$/.test(s.event.accent) ? s.event.accent : '#c94a0a';
+  const photo = catalog.photo.find((l) => l.id === s.templates.photoDefaultLayout)?.image ?? catalog.photo[0]?.image;
+  const badge = catalog.badge.find((f) => f.id === s.templates.badgeDefaultFrame)?.image ?? catalog.badge[0]?.image;
+  const title = s.event.title || s.brand.photoTitle || 'ชื่องาน';
+  const sub = s.event.subtitle || s.brand.photoTagline;
+  const date = s.event.date || new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <div role="tablist" aria-label="ตัวอย่างหน้าจอ" className="flex gap-1 rounded-full bg-ink-800 p-1 text-sm">
+        {(
+          [
+            ['attract', 'หน้าแรก'],
+            ['photo', 'ภาพ 4x6'],
+            ['badge', 'เข็มกลัด']
+          ] as const
+        ).map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => setView(id)} className={clsx('rounded-full px-3 py-1.5', view === id ? 'bg-surface font-semibold text-ink-900' : 'text-ink-300 hover:text-white')}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="flex aspect-[9/16] w-full max-w-[300px] flex-col items-center gap-3 overflow-hidden rounded-[26px] border-8 border-ink-950 bg-white px-5 py-7 text-center" style={{ backgroundImage: `linear-gradient(${accent}14, ${accent}14)` }}>
+        {view === 'attract' ? (
+          <>
+            {s.brand.brandName ? <div className="text-xs font-semibold tracking-[0.2em]" style={{ color: accent }}>{s.brand.brandName.toUpperCase()}</div> : null}
+            <div className="text-2xl leading-tight font-bold text-ink-900">{title}</div>
+            {sub ? <div className="text-sm text-ink-600">{sub}</div> : null}
+            <div className="text-xs text-ink-500">{date}</div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            {photo ? <img src={photo} alt="" className="mt-1 w-[58%] -rotate-3 rounded shadow-lg" /> : null}
+            <div className="mt-auto rounded-full px-6 py-2.5 text-sm font-semibold text-white" style={{ backgroundColor: accent }}>
+              แตะเพื่อเริ่ม
+            </div>
+          </>
+        ) : view === 'photo' ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          photo ? <img src={photo} alt="กรอบเริ่มต้น" className="my-auto w-full rounded shadow-lg" /> : <p className="my-auto text-sm text-ink-500">ยังไม่มีกรอบ</p>
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          badge ? <img src={badge} alt="กรอบเข็มกลัดเริ่มต้น" className="my-auto w-[80%] rounded-full shadow-lg" /> : <p className="my-auto text-sm text-ink-500">ยังไม่มีกรอบ</p>
+        )}
+      </div>
+      <p className="text-center text-xs text-ink-400">ตัวอย่างโดยประมาณ • ภาพกรอบเป็นตัวอย่างของแบบนั้น ที่ตู้จะใส่ชื่องานและภาพลูกค้าจริง</p>
+    </div>
+  );
+}
+
 function Section({ title, hint, icon, children, dim, perm }: { title: string; hint?: string; icon?: ReactNode; children: ReactNode; dim?: boolean; perm?: ConfigSectionId }) {
   const level = useContext(LevelContext)(perm ?? 'identity');
   const inherited = useContext(InheritContext)(perm ?? 'identity');
   const actions = useContext(InheritActions);
+  const view = useContext(ViewContext);
   if (perm && level === 'hidden') return null;
   const locked = !!perm && level === 'view';
+  const meta = SECTION_META[title];
+  const summary = view?.summary(title) ?? '';
+  const q = view?.query.trim().toLowerCase() ?? '';
+  if (view && meta) {
+    if (view.variant === 'wizard' ? !view.stepTitles.includes(title) : q && !`${title} ${hint ?? ''} ${meta.keywords ?? ''} ${summary}`.toLowerCase().includes(q)) return null;
+  }
+  const changed = !!(view && meta && view.changed(meta.paths));
+  const failed = !!(view && meta && view.failed(meta.paths));
+
+  const badges =
+    perm && inherited ? (
+      <span className="flex flex-wrap items-center gap-2">
+        <InheritBadge label={inherited} />
+        {actions?.canFlip(perm) ? (
+          <button type="button" onClick={() => actions.own(perm)} className="rounded-full border border-primary-300 bg-surface px-2.5 py-0.5 text-xs font-medium text-primary-700 hover:bg-primary-50">
+            ตั้งเฉพาะตู้นี้
+          </button>
+        ) : null}
+        {actions?.sourceHref ? (
+          <a href={actions.sourceHref} className="text-xs font-medium text-ink-600 underline hover:text-ink-900">
+            แก้ที่{inherited}
+          </a>
+        ) : null}
+      </span>
+    ) : locked ? (
+      <LockBadge />
+    ) : null;
+  const body = (
+    <>
+      {perm ? <OwnersNote perm={perm} /> : null}
+      <fieldset disabled={locked} className="grid gap-5 p-5 sm:grid-cols-2">
+        {children}
+      </fieldset>
+    </>
+  );
+
+  // Cards: a summary card; the section itself opens in the side panel
+  if (view && meta && view.variant === 'cards') {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => view.setActive(title)}
+          style={{ order: orderOf(title) }}
+          className={clsx(
+            'flex min-w-0 flex-col gap-1.5 rounded-card border bg-surface p-4 text-left shadow-card transition-colors hover:border-primary-400',
+            failed ? 'border-danger-300' : changed ? 'border-primary-400 ring-1 ring-primary-200' : 'border-ink-200',
+            dim && 'opacity-60'
+          )}
+        >
+          <span className="flex items-center gap-2">
+            {icon ? <span className="text-primary-600 [&>svg]:size-[18px]">{icon}</span> : null}
+            <span className="min-w-0 flex-1 text-base font-semibold text-ink-900">{title}</span>
+            {failed ? (
+              <span className="rounded-full bg-danger-50 px-2 py-0.5 text-xs font-medium text-danger-700">ต้องแก้</span>
+            ) : changed ? (
+              <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">แก้แล้ว</span>
+            ) : inherited ? (
+              <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs whitespace-nowrap text-primary-700">ตาม{inherited}</span>
+            ) : locked ? (
+              <Lock className="size-3.5 text-ink-400" aria-label="จัดการโดยผู้ให้บริการ" />
+            ) : null}
+          </span>
+          <span className="line-clamp-2 text-sm text-ink-600">{summary || hint}</span>
+        </button>
+        {view.active === title ? (
+          <Drawer title={title} hint={hint} icon={icon} badges={badges} preview={view.preview(title)} onClose={() => view.setActive(null)}>
+            {body}
+          </Drawer>
+        ) : null}
+      </>
+    );
+  }
+
+  // Wizard step, or no layout context: the whole section
   return (
-    <section className={clsx('overflow-hidden rounded-card border border-ink-200 bg-surface shadow-card', dim && 'opacity-60')}>
+    <section id={`sec-${title}`} className={clsx('overflow-hidden rounded-card border bg-surface shadow-card', failed ? 'border-danger-300' : 'border-ink-200', dim && 'opacity-60')}>
       <header className="flex items-start gap-3 border-b border-ink-100 px-5 py-3">
         {icon ? <span className="mt-0.5 text-primary-600 [&>svg]:size-5">{icon}</span> : null}
         <div className="min-w-0 flex-1">
           <h2 className="text-lg leading-tight font-semibold text-ink-900">{title}</h2>
           {hint ? <p className="mt-0.5 text-sm text-ink-500">{hint}</p> : null}
         </div>
-        {perm && inherited ? (
-          <span className="flex flex-wrap items-center justify-end gap-2">
-            <InheritBadge label={inherited} />
-            {actions?.canFlip(perm) ? (
-              <button type="button" onClick={() => actions.own(perm)} className="rounded-full border border-primary-300 bg-surface px-2.5 py-0.5 text-xs font-medium text-primary-700 hover:bg-primary-50">
-                ตั้งเฉพาะตู้นี้
-              </button>
-            ) : null}
-            {actions?.sourceHref ? (
-              <a href={actions.sourceHref} className="text-xs font-medium text-ink-600 underline hover:text-ink-900">
-                แก้ที่{inherited}
-              </a>
-            ) : null}
-          </span>
-        ) : locked ? (
-          <LockBadge />
-        ) : null}
+        {badges}
       </header>
-      {perm ? <OwnersNote perm={perm} /> : null}
-      <fieldset disabled={locked} className="grid gap-5 p-5 sm:grid-cols-2">
-        {children}
-      </fieldset>
+      {body}
     </section>
   );
+}
+
+const getIn = (obj: unknown, path: string): unknown => path.split('.').reduce<unknown>((o, k) => (o && typeof o === 'object' ? (o as Record<string, unknown>)[k] : undefined), obj);
+
+// ─── small immutable path setter ────────────────────────────────────────────
+function setIn<T>(obj: T, path: string, value: unknown): T {
+  const [head, ...rest] = path.split('.');
+  const src = obj as Record<string, unknown>;
+  return { ...src, [head!]: rest.length ? setIn(src[head!], rest.join('.'), value) : value } as T;
 }
 
 function Err({ msg }: { msg?: string }) {
@@ -353,7 +570,10 @@ export function ConfigEditor({
   initialEventId = null,
   initialOwn = null,
   layerOwners,
-  followAction
+  followAction,
+  variant = 'cards',
+  copySources = [],
+  doneHref
 }: Props) {
   const router = useRouter();
   const [s, setS] = useState<EditableSettings>(initial);
@@ -375,7 +595,14 @@ export function ConfigEditor({
   });
   const [pin, setPin] = useState<PinChange>({ action: 'keep' });
   const [note, setNote] = useState('');
-  const [showAll, setShowAll] = useState(false);
+  // ค่ากลาง / งาน serve kiosks of every mode: show every mode's settings there by default
+  const wizard = variant === 'wizard';
+  // ค่ากลาง / งาน serve kiosks of every mode: every mode's settings there (the wizard: the mode picked)
+  const [showAll, setShowAll] = useState(scope === 'preset' && !wizard);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState<string | null>(null);
+  const [step, setStep] = useState(0);
+  const [reviewing, setReviewing] = useState(false);
   const [result, setResult] = useState<SaveConfigResult | null>(null);
   const [pending, start] = useTransition();
   const dirty = useMemo(
@@ -451,6 +678,75 @@ export function ConfigEditor({
 
   const errorCount = Object.keys(e).length;
 
+  // Which sections / tabs have unsaved changes or errors
+  const changedPaths = (paths: string[]) =>
+    paths.some((path) => (path === '$pin' ? pin.action !== 'keep' : JSON.stringify(getIn(s, path)) !== JSON.stringify(getIn(saved.settings, path))));
+  const failedPaths = (paths: string[]) => Object.keys(e).some((k) => paths.some((path) => { const key = k.replace(/^settings\./, ''); return path === '$pin' ? key.startsWith('pin') : key === path || key.startsWith(`${path}.`); }));
+  const groupStats = (g: GroupId) => {
+    const metas = Object.entries(SECTION_META).filter(([, m]) => m.group === g);
+    return { changed: metas.filter(([, m]) => changedPaths(m.paths)).length, failed: metas.filter(([, m]) => failedPaths(m.paths)).length };
+  };
+  const onOff = (b: boolean) => (b ? 'เปิด' : 'ปิด');
+  const nameOf = (list: readonly { id: string; name: string }[], id: string) => list.find((x) => x.id === id)?.name ?? id;
+  const countOf = (list: string[], all: string) => (list.length ? `${list.length} แบบ` : all);
+  const summaries: Record<string, () => string> = {
+    'โหมดตู้': () => nameOf(APP_MODES, s.appMode),
+    'ตัวตนตู้': () => [s.identity.name, s.identity.location].filter(Boolean).join(' • ') || '—',
+    'สินค้าและราคา (Photo 4x6)': () =>
+      [s.products.photo.sell && `ภาพ ฿${s.products.photo.price}`, s.products.badge.sell && `เข็มกลัด ฿${s.products.badge.price}`, s.products.bundle.sell && `ภาพ+เข็มกลัด ฿${s.products.bundle.price}`, s.photoFulfillment === 'pickup' ? 'รับที่จุดรับรูป' : 'พิมพ์ที่ตู้']
+        .filter(Boolean)
+        .join(' • '),
+    'ราคา Classic Receipt': () => `${CLASSIC_TEMPLATES.map((t) => `${t.name} ฿${s.products.classic[t.id]}`).join(' • ')} • ${countOf(s.templates.classic, 'ทุกแบบ')}`,
+    'AI Studio': () => `฿${s.products.ai.price}/ครั้ง • สร้างใหม่ ${onOff(s.products.ai.allowRegenerate)} • ฉาก ${countOf(s.templates.aiScenes, 'ทุกฉาก')}${s.ai.demoMode ? ' • โหมดสาธิต' : ''}`,
+    'แบรนด์และธีมงาน': () => [s.brand.brandName, s.event.title, s.event.date].filter(Boolean).join(' • ') || 'ยังไม่ได้ตั้งชื่อแบรนด์หรือชื่องาน',
+    'กรอบภาพ 4x6': () => `${countOf(s.templates.photoLayouts, 'ทุกกรอบ')} • เริ่มที่ ${nameOf(catalog.photo, s.templates.photoDefaultLayout)}`,
+    'เข็มกลัด': () => `${s.badge.size} มม. × ${s.badge.copies} ชิ้น • ${countOf(s.templates.badgeFrames, 'ทุกกรอบ')}`,
+    'การพิมพ์': () =>
+      s.print.enabled
+        ? ['เปิด', show('photo') && !s.print.photo && 'ไม่พิมพ์ภาพ', show('photo') && !s.print.badge && 'ไม่พิมพ์เข็มกลัด', show('photo') && s.print.queueSlip && `ใบคิว ${s.print.queuePrefix}001`].filter(Boolean).join(' • ')
+        : 'ปิดการพิมพ์ (ลูกค้ารับภาพผ่าน QR)',
+    'กระดาษ': () =>
+      [show('photo', 'pickup') && `ภาพ ${s.paper.photo.toUpperCase()}`, show('classic') && `Classic ${s.paper.classic === 'auto' ? 'ตามเครื่อง' : s.paper.classic}`, show('ai') && `AI ${s.paper.ai === 'auto' ? 'ตามเครื่อง' : s.paper.ai.toUpperCase()}`]
+        .filter(Boolean)
+        .join(' • '),
+    'ข้อความตกแต่ง': () => {
+      const n = Object.values(s.decor).reduce((sum, list) => sum + (Array.isArray(list) ? list.length : 0), 0);
+      return n ? `${n} ข้อความ` : 'ยังไม่มีข้อความ';
+    },
+    'เสียงและเพลง': () => `เสียงพูด ${onOff(s.sound.voiceGuide)} • เพลง ${onOff(s.sound.musicOn)}`,
+    'การรับเงิน': () => (s.payment.bypass ? 'ใช้ฟรี (ไม่เก็บเงิน)' : s.payment.enabled ? (s.payment.mode === 'live' ? 'รับเงินจริง' : 'โหมดทดสอบ') : 'จำลองการจ่ายเงิน'),
+    'ดาวน์โหลดภาพ (QR)': () => (s.share.enabled ? `เปิด • เก็บ ${s.share.retentionDays} วัน` : 'ปิด'),
+    'รูปจากมือถือ': () => onOff(s.phoneUpload.enabled),
+    'ชูมือเริ่มถ่าย': () => onOff(s.gesture.palmStart),
+    'ภาพเคลื่อนไหว (ดุ๊กดิ๊ก)': () => (s.motion.enabled ? 'เปิด • ลูกค้าเลือกตอนถ่าย' : 'ปิด'),
+    'พฤติกรรมตู้': () => `กลับหน้าแรกใน ${s.idleReturnSec} วินาที • ${saved.hasPin ? 'มีรหัสผู้ดูแลจาก Admin' : 'ใช้รหัสในตู้'}`
+  };
+  const shownTitle = (title: string) => {
+    const m = SECTION_META[title];
+    return !!m && (!m.kioskOnly || scope === 'kiosk') && (!m.modes || show(...m.modes));
+  };
+  // Wizard: steps with nothing for the chosen mode are skipped
+  const steps = WIZARD_STEPS.filter((st) => !st.titles.length || st.titles.some(shownTitle));
+  const stepNow = steps[Math.min(step, steps.length - 1)]!;
+  const view: EditorView = {
+    variant,
+    query,
+    active,
+    setActive,
+    stepTitles: stepNow.titles,
+    summary: (title) => summaries[title]?.() ?? '',
+    changed: changedPaths,
+    failed: failedPaths,
+    preview: (title) => (['แบรนด์และธีมงาน', 'กรอบภาพ 4x6', 'เข็มกลัด', 'ข้อความตกแต่ง'].includes(title) ? <KioskPreview s={s} catalog={catalog} /> : null)
+  };
+  // Wizard: saved → the event's page
+  useEffect(() => {
+    if (wizard && result?.ok && doneHref) router.push(doneHref);
+  }, [wizard, result, doneHref, router]);
+  const changes = dirty ? diffSettings(saved.settings, s) : [];
+  const changeCount = changes.length + (pin.action !== 'keep' ? 1 : 0);
+  const groupShown = (g: GroupId) => Object.entries(SECTION_META).some(([title, m]) => m.group === g && shownTitle(title));
+
   const lockedCount = isPlatform ? 0 : Object.values(permissions).filter((l) => l !== 'edit').length;
 
   return (
@@ -475,10 +771,18 @@ export function ConfigEditor({
       }}
       className="flex flex-col gap-6 pb-28"
     >
+      {!wizard ? (
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="flex items-center gap-2 text-sm text-ink-600">
-          <input type="checkbox" checked={showAll} onChange={(ev) => setShowAll(ev.target.checked)} className="size-4 accent-primary-600" /> แสดงการตั้งค่าของทุกโหมด
-        </label>
+        <div role="radiogroup" aria-label="แสดงการตั้งค่าของ" className="inline-flex rounded-full border border-ink-200 bg-surface p-1 text-sm">
+          {[
+            { all: false, label: `เฉพาะโหมด ${nameOf(APP_MODES, mode)}` },
+            { all: true, label: 'ทุกโหมด' }
+          ].map((o) => (
+            <button key={String(o.all)} type="button" role="radio" aria-checked={showAll === o.all} onClick={() => setShowAll(o.all)} className={clsx('rounded-full px-3 py-1.5 font-medium', showAll === o.all ? 'bg-primary-600 text-white' : 'text-ink-600 hover:text-ink-900')}>
+              {o.label}
+            </button>
+          ))}
+        </div>
         {lockedCount ? (
           <span className="flex items-center gap-1.5 text-sm text-ink-500">
             <Lock className="size-4" aria-hidden />
@@ -486,6 +790,7 @@ export function ConfigEditor({
           </span>
         ) : null}
       </div>
+      ) : null}
       {layered ? (
         <section className="overflow-hidden rounded-card border border-primary-200 bg-surface shadow-card">
           <header className="flex items-start gap-3 border-b border-ink-100 px-5 py-3">
@@ -533,6 +838,84 @@ export function ConfigEditor({
         </section>
       ) : null}
 
+      {wizard ? (
+        <div className="flex flex-col gap-4">
+          <ol aria-label="ขั้นตอน" className="grid gap-2" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
+            {steps.map((st, i) => (
+              <li key={st.label}>
+                <button type="button" onClick={() => setStep(i)} className="flex w-full flex-col gap-1.5 text-left" aria-current={i === step ? 'step' : undefined}>
+                  <span className={clsx('h-1.5 rounded-full', i <= step ? 'bg-primary-600' : 'bg-ink-200')} />
+                  <span className={clsx('text-sm', i === step ? 'font-semibold text-primary-700' : 'text-ink-600')}>
+                    {i + 1} {st.label}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ol>
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-bold text-ink-900">{stepNow.label}</h2>
+              <p className="text-ink-600">{stepNow.intro}</p>
+            </div>
+            {step === 0 && copySources.length ? (
+              <label className="flex items-center gap-2 text-sm text-ink-700">
+                คัดลอกจาก
+                <select
+                  className={clsx(inputCls(), 'h-10 w-56')}
+                  value=""
+                  onChange={(ev) => {
+                    const src = copySources.find((x) => x.id === ev.target.value);
+                    if (src) setS(structuredClone(src.settings));
+                  }}
+                  aria-label="คัดลอกการตั้งค่าจาก"
+                >
+                  <option value="">เลือกงานก่อน หรือค่ากลาง…</option>
+                  {copySources.map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <div className="sticky top-16 z-20 -mx-1 bg-canvas/95 px-1 py-2 backdrop-blur">
+          <label className="relative block">
+            <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-400" aria-hidden />
+            <input value={query} onChange={(ev) => setQuery(ev.target.value)} placeholder="ค้นหาการตั้งค่า เช่น ราคา, QR, ใบคิว, กระดาษ" aria-label="ค้นหาการตั้งค่า" className={clsx(inputCls(), 'pl-9')} />
+          </label>
+        </div>
+      )}
+
+      <ViewContext.Provider value={view}>
+      {wizard && stepNow.titles.length === 0 ? (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {Object.keys(SECTION_META)
+            .filter(shownTitle)
+            .map((title) => (
+              <div key={title} className="rounded-card border border-ink-200 bg-surface p-4">
+                <div className="text-xs font-semibold text-ink-500">{GROUPS.find((g) => g.id === SECTION_META[title]!.group)!.label}</div>
+                <div className="font-semibold text-ink-900">{title}</div>
+                <div className="text-sm text-ink-600">{summaries[title]?.()}</div>
+              </div>
+            ))}
+        </div>
+      ) : null}
+      <div className={wizard ? (stepNow.preview ? 'grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]' : '') : 'grid gap-4 sm:grid-cols-2 xl:grid-cols-3'}>
+      <div className={wizard ? 'flex flex-col gap-6' : 'contents'}>
+      {!wizard
+        ? GROUPS.filter((g) => groupShown(g.id)).map((g, gi) => {
+            const st = groupStats(g.id);
+            return (
+              <h2 key={g.id} style={{ order: GROUPS.findIndex((x) => x.id === g.id) * 100 }} className={clsx('col-span-full flex items-center gap-2 text-sm font-semibold tracking-wide text-ink-500', gi > 0 && 'mt-3', query.trim() && 'hidden')}>
+                {g.label}
+                {st.failed ? <span className="rounded-full bg-danger-50 px-2 py-0.5 text-xs text-danger-700">ต้องแก้ {st.failed}</span> : st.changed ? <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs text-primary-700">แก้แล้ว {st.changed}</span> : null}
+              </h2>
+            );
+          })
+        : null}
       <Section title="โหมดตู้" perm="mode" icon={<LayoutGrid aria-hidden />} hint="ตู้เปลี่ยนโหมดเมื่อกลับถึงหน้าแรก">
         <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2 lg:grid-cols-4">
           {APP_MODES.map((m) => (
@@ -859,6 +1242,22 @@ export function ConfigEditor({
         <Num label="เก็บภาพ" value={s.share.retentionDays} onChange={set('share.retentionDays')} error={err('share.retentionDays')} disabled={ro || !s.share.enabled} min={1} max={90} suffix="วัน" />
       </Section>
 
+      <Section title="ชูมือเริ่มถ่าย" perm="phone" icon={<Hand aria-hidden />} hint="ลูกค้าชูฝ่ามือ 5 นิ้วให้กล้องเห็นค้างไว้ราว 1 วินาที ตู้เริ่มนับ 3-2-1 เอง (ทุกโหมด) • ปุ่มกดถ่ายยังใช้ได้เหมือนเดิม • ใช้กับช็อตแรก ช็อตต่อไปนับถอยหลังเอง">
+        <Toggle label="เริ่มถ่ายด้วยการชูฝ่ามือ" checked={s.gesture.palmStart} onChange={set('gesture.palmStart')} disabled={ro} />
+      </Section>
+
+      {show('photo', 'classic') ? (
+        <Section title="ภาพเคลื่อนไหว (ดุ๊กดิ๊ก)" perm="phone" icon={<Sparkles aria-hidden />} hint="ลูกค้าเปิดสวิตช์ &quot;เปิดการถ่ายภาพเคลื่อนไหว 5 วิ&quot; ได้ที่หน้าถ่ายภาพ ทุกกรอบ • หลังชัตเตอร์ตู้ถ่ายรัว 5 วิ แล้วได้ภาพ GIF ในลิงก์ QR • ภาพที่พิมพ์ยังเป็นภาพนิ่ง">
+          <Toggle label="ให้ลูกค้าถ่ายภาพเคลื่อนไหวได้" checked={s.motion.enabled} onChange={set('motion.enabled')} disabled={ro} hint={s.share.enabled ? 'ต้องเปิดดาวน์โหลดภาพ (QR) ด้วย ลูกค้าจึงได้รับไฟล์' : 'ยังปิดดาวน์โหลดภาพ (QR) อยู่: ลูกค้าจะยังไม่ได้รับไฟล์เคลื่อนไหวจนกว่าจะเปิด'} />
+        </Section>
+      ) : null}
+
+      {show('photo', 'classic') ? (
+        <Section title="รูปจากมือถือ" perm="phone" icon={<Smartphone aria-hidden />} hint="ลูกค้าสแกน QR ที่ตู้ เลือกรูปจากอัลบั้มมือถือ แล้วส่งเข้าตู้แทนการถ่าย (Photo 4x6 / เข็มกลัด / Classic) • รูปถูกลบจากระบบทันทีที่ตู้รับแล้ว">
+          <Toggle label="ให้ลูกค้าส่งรูปจากมือถือได้" checked={s.phoneUpload.enabled} onChange={set('phoneUpload.enabled')} disabled={ro} hint="ตู้ที่เชื่อม Admin ส่งผ่านอินเทอร์เน็ต ตู้ที่ไม่ได้เชื่อม ลูกค้าต้องต่อ Wi-Fi เดียวกับตู้" />
+        </Section>
+      ) : null}
+
       <Section title="พฤติกรรมตู้" perm="behavior" icon={<Timer aria-hidden />}>
         <Num label="กลับหน้าแรกเมื่อไม่มีการแตะ" value={s.idleReturnSec} onChange={set('idleReturnSec')} error={err('idleReturnSec')} disabled={ro} min={30} max={600} suffix="วินาที" hint="เฉพาะหน้าก่อนจ่ายเงิน" />
         <fieldset className="flex flex-col gap-2" disabled={ro}>
@@ -891,9 +1290,68 @@ export function ConfigEditor({
         </fieldset>
       </Section>
 
-      {canEdit ? (
+      </div>
+      {wizard && stepNow.preview ? (
+        <aside aria-label="ตัวอย่างที่ตู้" className="sticky top-20 hidden rounded-card bg-ink-900 p-5 lg:block">
+          <KioskPreview s={s} catalog={catalog} />
+        </aside>
+      ) : null}
+      </div>
+      </ViewContext.Provider>
+
+      {wizard && canEdit ? (
+        <div className="fixed inset-x-0 bottom-0 z-10 border-t border-ink-200 bg-surface/95 px-4 py-3 backdrop-blur lg:left-64">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
+            <button type="button" disabled={step === 0 || pending} onClick={() => setStep((x) => Math.max(0, x - 1))} className={buttonClass('outline')}>
+              <ChevronLeft className="size-4" aria-hidden />
+              ย้อนกลับ
+            </button>
+            {result && !result.ok ? (
+              <p role="alert" className="text-sm text-danger-600">
+                {result.message}
+              </p>
+            ) : null}
+            {step < steps.length - 1 ? (
+              // own keys: the same element turning into the submit button mid-click would submit the form
+              <button key="next" type="button" onClick={() => setStep((x) => Math.min(steps.length - 1, x + 1))} className={buttonClass()}>
+                ถัดไป: {steps[step + 1]!.label}
+                <ChevronRight className="size-4" aria-hidden />
+              </button>
+            ) : (
+              <button key="save" type="submit" disabled={pending} className={buttonClass()}>
+                <Check className="size-4" aria-hidden />
+                {pending ? 'กำลังบันทึก…' : 'บันทึกงานนี้'}
+              </button>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {!wizard && canEdit ? (
         <div className="fixed inset-x-0 bottom-0 z-10 border-t border-ink-200 bg-surface/95 px-4 py-3 backdrop-blur lg:left-64">
           <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3">
+            {reviewing && dirty ? (
+              <div className="max-h-56 w-full overflow-y-auto rounded-lg border border-ink-200 bg-surface p-3 text-sm">
+                <p className="mb-2 font-semibold text-ink-900">สิ่งที่จะเปลี่ยน ({changeCount})</p>
+                {!changeCount ? <p className="text-ink-600">เปลี่ยนที่มาของการตั้งค่า (ค่ากลาง / งาน / ตั้งเฉพาะตู้นี้)</p> : null}
+                {pin.action !== 'keep' ? <p className="text-ink-800">รหัสผู้ดูแลตู้: {pin.action === 'set' ? 'ตั้งรหัสใหม่' : 'ยกเลิกรหัสจาก Admin'}</p> : null}
+                <ul className="flex flex-col gap-1">
+                  {changes.map((c) => (
+                    <li key={c.path} className="flex flex-wrap gap-x-2">
+                      <span className="font-medium text-ink-800">{c.label}:</span>
+                      <span className="text-ink-500 line-through">{c.before}</span>
+                      <span aria-hidden>→</span>
+                      <span className="text-ink-900">{c.after}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {dirty ? (
+              <button type="button" onClick={() => setReviewing((r) => !r)} className="text-sm font-medium text-primary-700 underline">
+                {reviewing ? 'ซ่อนรายการ' : changeCount ? `ดูสิ่งที่เปลี่ยน (${changeCount})` : 'ดูสิ่งที่เปลี่ยน'}
+              </button>
+            ) : null}
             <input className={clsx(inputCls(), 'min-w-48 flex-1')} placeholder="บันทึกสั้นๆ ว่าเปลี่ยนอะไร (ไม่บังคับ)" value={note} onChange={(ev) => setNote(ev.target.value)} maxLength={255} aria-label="บันทึกการเปลี่ยนแปลง" />
             <button type="submit" disabled={pending || !dirty} className={buttonClass()}>
               {pending ? 'กำลังบันทึก…' : 'บันทึกและส่งไปตู้'}
