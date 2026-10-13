@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
-import { Landmark, Link2, ReceiptText } from 'lucide-react';
+import { CircleAlert, Landmark, Link2, ReceiptText } from 'lucide-react';
 import { requireOrg } from '@/server/auth/context';
 import { can } from '@/server/auth/rbac';
 import { orgPaymentSummary } from '@/server/services/payment-accounts';
-import { orgPayments } from '@/server/services/payments';
+import { orgPayments, unservedAiPayments } from '@/server/services/payments';
 import { publicOrigin } from '@/server/lib/public-url';
 import { ActionForm, FormField, SubmitButton } from '@/components/form';
 import { StripeKeysFields } from '@/components/stripe-keys-fields';
@@ -25,7 +25,8 @@ export default async function PaymentsSettingsPage({ params }: { params: Promise
   const { orgSlug } = await params;
   const ctx = await requireOrg(orgSlug, 'payment.view');
   const canManage = can(ctx.principal, 'org.settings');
-  const [s, list, origin] = await Promise.all([orgPaymentSummary(ctx.org), orgPayments(ctx.org.id, 30), publicOrigin()]);
+  const [s, list, origin, unserved] = await Promise.all([orgPaymentSummary(ctx.org), orgPayments(ctx.org.id, 30), publicOrigin(), unservedAiPayments(ctx.org.id)]);
+  const unservedIds = new Set(unserved.map((p) => p.id));
 
   return (
     <>
@@ -109,6 +110,37 @@ export default async function PaymentsSettingsPage({ params }: { params: Promise
           </Notice>
         )}
 
+        {unserved.length ? (
+          <Card flush title={`ชำระเงินแล้วแต่ยังไม่ได้รับภาพ AI (${unserved.length})`} icon={<CircleAlert aria-hidden />}>
+            <p className="px-5 pt-1 pb-3 text-sm text-ink-600">
+              ลูกค้าจ่ายเงินแล้วแต่สร้างภาพไม่สำเร็จ ให้ลูกค้าลองใหม่ที่ตู้ หรือคืนเงินในหน้า Stripe Dashboard ด้วยรหัส PaymentIntent ด้านล่าง
+            </p>
+            <Table bare>
+              <thead>
+                <tr>
+                  <Th>ชำระเมื่อ</Th>
+                  <Th>รายการ</Th>
+                  <Th className="text-right">ยอด</Th>
+                  <Th>Stripe PaymentIntent</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {unserved.map((p) => (
+                  <tr key={p.id}>
+                    <Td className="whitespace-nowrap tabular-nums">{p.paidAt ? formatDateTime(p.paidAt) : '-'}</Td>
+                    <Td>
+                      {p.description || p.product}
+                      {p.mode === 'test' ? <Badge className="ml-2">ทดสอบ</Badge> : null}
+                    </Td>
+                    <Td className="text-right tabular-nums">{formatBaht(p.amount)}</Td>
+                    <Td className="font-mono text-sm">{p.stripeIntentId}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </Card>
+        ) : null}
+
         <Card flush title="รายการรับเงินล่าสุด" icon={<ReceiptText aria-hidden />}>
           {list.length ? (
             <Table bare>
@@ -132,6 +164,7 @@ export default async function PaymentsSettingsPage({ params }: { params: Promise
                     <Td className="text-right tabular-nums">{formatBaht(p.amount)}</Td>
                     <Td>
                       <Badge tone={STATUS[p.status]?.tone ?? 'neutral'}>{STATUS[p.status]?.label ?? p.status}</Badge>
+                      {unservedIds.has(p.id) ? <Badge tone="danger" className="ml-2">ยังไม่ได้รับภาพ</Badge> : null}
                     </Td>
                     <Td className="text-sm text-ink-600">{p.account === 'shop' ? 'บัญชีร้าน' : 'บัญชีกลาง'}</Td>
                   </tr>

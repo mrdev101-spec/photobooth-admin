@@ -107,7 +107,9 @@ export const KioskEventSchema = z.discriminatedUnion('type', [
     type: z.literal('files'),
     clientOrderId: z.string().min(1).max(64),
     downloadUrl: httpUrl.optional(),
-    files: z.array(OrderFileSchema).max(10).default([])
+    files: z.array(OrderFileSchema).max(10).default([]),
+    /** When the kiosk queued it (newer kiosks): lets the Admin give up if its order never came. */
+    at: z.iso.datetime().optional()
   })
 ]);
 export type KioskEvent = z.input<typeof KioskEventSchema>;

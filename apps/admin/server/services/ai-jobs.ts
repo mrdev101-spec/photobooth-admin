@@ -120,8 +120,8 @@ export interface NewJob {
   sceneId: string;
   photo: AiImage;
   crop: AiImage | null;
-  /** A paid payment (with the AI price it must cover), or null when the kiosk does not charge. */
-  payment: { id: string; minAmount: number } | null;
+  /** A paid AI payment made at this kiosk, or null when the shop uses free mode. */
+  payment: { id: string } | null;
 }
 
 /** Queues a job (a retried request with the same requestId gets the existing job). */
@@ -138,7 +138,14 @@ export async function createAiJob(org: Organization, kioskRowId: string, input: 
   // One paid payment per image (taken before anything is generated; given back if the job fails)
   if (input.payment) {
     try {
-      await claimPayment(org.id, input.payment.id, `ai:${id}`, input.payment.minAmount);
+      const holder = await claimPayment(org.id, kioskRowId, input.payment.id, `ai:${id}`);
+      // The kiosk retried under a new request id: give it the job this payment already pays for
+      // instead of refusing a customer who has paid
+      if (holder) {
+        const held = holder.startsWith('ai:') ? await jobById(holder.slice(3)) : null;
+        if (held && held.kioskRowId === kioskRowId) return { job: held, created: false };
+        throw new AiJobError('AD0008', 402, 'การชำระเงินนี้ถูกใช้ไปแล้ว');
+      }
     } catch (err) {
       if (err instanceof PaymentFlowError) throw new AiJobError(err.code, err.status, err.message);
       throw err;

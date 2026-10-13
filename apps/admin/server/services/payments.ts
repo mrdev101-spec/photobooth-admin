@@ -3,7 +3,7 @@ import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { db } from '@/server/db/client';
 import { organizations, payments, type Payment } from '@/server/db/schema';
 import { newId } from '@/server/lib/ids';
-import { currentSettings } from '@/server/services/kiosk-config';
+import { currentSettings, shownSettings } from '@/server/services/kiosk-config';
 import { accountFor, callForPayment, markWebhook, webhookSecrets, type PayMode } from '@/server/services/payment-accounts';
 import { StripeError, stripeRequest, verifyStripeSignature, type StripeCall } from '@/server/payments/stripe';
 import type { KioskAuth } from '@/server/kiosk-api/auth';
@@ -53,9 +53,9 @@ function statusOf(intent: any): Payment['status'] {
   return 'failed';
 }
 
-/** What a kiosk may charge now (its current settings), or why not. */
+/** What a kiosk may charge now (the settings its screen shows), or why not. */
 async function payRules(auth: KioskAuth) {
-  const cur = await currentSettings(auth.kiosk);
+  const cur = await shownSettings(auth.kiosk);
   if (!cur) throw new PaymentFlowError('PM0001', 409, 'ตู้นี้ยังไม่มีการตั้งค่าจาก Admin');
   const p = cur.settings.payment;
   if (!p.enabled) throw new PaymentFlowError('PM0001', 409, 'ตู้นี้ไม่ได้เปิดรับเงินผ่าน PromptPay');
@@ -65,7 +65,7 @@ async function payRules(auth: KioskAuth) {
 
 /** For the kiosk's payment screen: can it show a real QR now, and from which account. */
 export async function kioskPaymentStatus(auth: KioskAuth) {
-  const cur = await currentSettings(auth.kiosk);
+  const cur = await shownSettings(auth.kiosk);
   const p = cur?.settings.payment;
   if (!p?.enabled) return { enabled: false, ready: false, mode: p?.mode ?? 'test', account: null, reason: 'disabled' as const };
   if (p.mode === 'live' && !auth.org.livePaymentsAllowed) return { enabled: true, ready: false, mode: p.mode, account: null, reason: 'live_not_allowed' as const };
@@ -79,9 +79,13 @@ export async function createKioskPayment(auth: KioskAuth, input: NewPayment): Pr
   const rules = await payRules(auth);
   const thb = Math.round(input.amount);
   if (!Number.isFinite(thb) || thb < MIN_AMOUNT_THB || thb > MAX_AMOUNT_THB) throw new PaymentFlowError('PM0004', 400, `จำนวนเงินไม่ถูกต้อง (${input.amount})`);
-  // AI images are paid per image at the price the shop set
-  if (/^ai:/.test(input.product) && thb !== rules.settings.products.ai.price) {
-    throw new PaymentFlowError('AD0006', 400, `ราคา AI ไม่ตรงกับการตั้งค่า (฿${thb} ≠ ฿${rules.settings.products.ai.price})`);
+  // AI images are paid per image at the price the shop set: the one on the kiosk's screen, or the
+  // newest one when the kiosk has just applied it
+  if (/^ai:/.test(input.product)) {
+    const latest = (await currentSettings(auth.kiosk))?.settings.products.ai.price;
+    if (thb !== rules.settings.products.ai.price && thb !== latest) {
+      throw new PaymentFlowError('AD0006', 400, `ราคา AI ไม่ตรงกับการตั้งค่า (฿${thb} ≠ ฿${rules.settings.products.ai.price})`);
+    }
   }
   const acct = await accountFor(auth.org, rules.mode);
   if (!acct) throw new PaymentFlowError('PM0001', 503, `ยังไม่ได้ตั้งค่าบัญชี Stripe โหมด${rules.mode === 'live' ? 'จริง' : 'ทดสอบ'}`);
@@ -230,7 +234,8 @@ export async function sweepExpiredPayments(limit = 10) {
 export async function handleStripeWebhook(rawBody: string, signature: string | null, orgId: string | null): Promise<[number, object]> {
   const secrets = await webhookSecrets(orgId);
   if (!secrets.length) return [400, { error: 'Webhook secret is not configured' }];
-  if (!secrets.some((s) => verifyStripeSignature(rawBody, signature, s.secret))) return [400, { error: 'Invalid signature' }];
+  const verifiedModes = secrets.filter((s) => verifyStripeSignature(rawBody, signature, s.secret)).map((s) => s.mode);
+  if (!verifiedModes.length) return [400, { error: 'Invalid signature' }];
   let event: any;
   try {
     event = JSON.parse(rawBody);
@@ -245,21 +250,27 @@ export async function handleStripeWebhook(rawBody: string, signature: string | n
   // An event only counts for the account it came from
   const fromShop = orgId !== null || !!event.account;
   if ((row.account === 'shop') !== fromShop || (orgId && row.orgId !== orgId)) return [200, { received: true, mismatch: true }];
+  // A test-mode secret or event can never change a live payment (and the other way round)
+  if (!verifiedModes.includes(row.mode as PayMode) || !!event.livemode !== (row.mode === 'live')) return [200, { received: true, mismatch: true }];
   await record(row, obj, 'webhook');
   return [200, { received: true }];
 }
 
-/** An AI image takes one paid, unused payment of this kiosk's customer (at the AI price). */
-export async function claimPayment(orgId: string, paymentId: string, usedBy: string, minAmount: number) {
+/**
+ * An AI image takes one paid, unused AI payment made at this kiosk. The price was checked when the
+ * QR was created, so a price change after the customer paid never refuses their image.
+ * Returns null when claimed, or the `usedBy` holder when this payment already pays another job.
+ */
+export async function claimPayment(orgId: string, kioskRowId: string, paymentId: string, usedBy: string): Promise<string | null> {
   const res = await db()
     .update(payments)
     .set({ usedBy })
-    .where(and(eq(payments.id, paymentId), eq(payments.orgId, orgId), eq(payments.status, 'succeeded'), isNull(payments.usedBy), gte(payments.amount, minAmount)));
-  if (res[0].affectedRows !== 1) {
-    const row = (await db().select().from(payments).where(and(eq(payments.id, paymentId), eq(payments.orgId, orgId))).limit(1))[0];
-    if (row?.usedBy === usedBy) return; // the same job retried
-    throw new PaymentFlowError('AD0008', 402, !row ? 'ไม่พบการชำระเงินนี้' : row.status !== 'succeeded' ? 'รายการนี้ยังไม่ได้ชำระเงิน' : row.usedBy ? 'การชำระเงินนี้ถูกใช้ไปแล้ว' : 'ยอดเงินน้อยกว่าราคา');
-  }
+    .where(and(eq(payments.id, paymentId), eq(payments.orgId, orgId), eq(payments.kioskRowId, kioskRowId), eq(payments.status, 'succeeded'), isNull(payments.usedBy), sql`${payments.product} like 'ai:%'`));
+  if (res[0].affectedRows === 1) return null;
+  const row = (await db().select().from(payments).where(and(eq(payments.id, paymentId), eq(payments.orgId, orgId))).limit(1))[0];
+  if (row?.usedBy === usedBy) return null; // the same job retried
+  if (row && row.kioskRowId === kioskRowId && row.status === 'succeeded' && row.usedBy) return row.usedBy;
+  throw new PaymentFlowError('AD0008', 402, !row || row.kioskRowId !== kioskRowId ? 'ไม่พบการชำระเงินนี้' : row.status !== 'succeeded' ? 'รายการนี้ยังไม่ได้ชำระเงิน' : 'รายการนี้ไม่ใช่การชำระค่าภาพ AI');
 }
 
 /** Gives a payment back (the image it paid for could not be made). */
@@ -291,6 +302,19 @@ export async function revenueByOrg(from: Date, to: Date, mode: PayMode = 'live')
 
 export async function orgPayments(orgId: string, limit = 50) {
   return db().select().from(payments).where(eq(payments.orgId, orgId)).orderBy(desc(payments.createdAt)).limit(limit);
+}
+
+/**
+ * AI payments the customer paid for but no image used (the job failed or the kiosk gave up).
+ * Shown to the shop so staff can make the image again or refund the customer in Stripe.
+ */
+export async function unservedAiPayments(orgId: string, olderThanMin = 10) {
+  return db()
+    .select()
+    .from(payments)
+    .where(and(eq(payments.orgId, orgId), eq(payments.status, 'succeeded'), isNull(payments.usedBy), sql`${payments.product} like 'ai:%'`, lt(payments.paidAt, new Date(Date.now() - olderThanMin * 60_000))))
+    .orderBy(desc(payments.paidAt))
+    .limit(100);
 }
 
 export function isPaymentError(e: unknown): e is PaymentFlowError | StripeError {

@@ -86,6 +86,19 @@ export async function currentSettings(kiosk: Pick<Kiosk, 'id' | 'currentRevision
   return r ? { revision: r.revision, settings: withSettingsDefaults(r.settings), createdAt: r.createdAt } : null;
 }
 
+/**
+ * The settings the kiosk is actually showing customers: it applies a new revision only at its
+ * attract screen, so prices and payment rules are checked against its applied revision (the
+ * current one until it has acknowledged any).
+ */
+export async function shownSettings(kiosk: Pick<Kiosk, 'id' | 'currentRevision' | 'appliedRevision'>) {
+  if (kiosk.appliedRevision && kiosk.appliedRevision !== kiosk.currentRevision) {
+    const r = await revisionRow(kiosk.id, kiosk.appliedRevision);
+    if (r) return { revision: r.revision, settings: withSettingsDefaults(r.settings), createdAt: r.createdAt };
+  }
+  return currentSettings(kiosk);
+}
+
 /** Rules that need the database or the customer's account, on top of the schema. */
 export async function checkBusinessRules(ctx: OrgContext, s: KioskSettings) {
   const issues: Record<string, string> = {};

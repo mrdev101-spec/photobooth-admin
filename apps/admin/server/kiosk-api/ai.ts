@@ -4,7 +4,7 @@ import { describeError } from '@photobooth/error-codes';
 import type { AiJob } from '@/server/db/schema';
 import { AiJobError, aiAvailability, createAiJob, kioskJob, jobResult, runAiJob, sweepAiJobs } from '@/server/services/ai-jobs';
 import { aiSettingsSummary } from '@/server/services/ai-settings';
-import { currentSettings } from '@/server/services/kiosk-config';
+import { shownSettings } from '@/server/services/kiosk-config';
 import { assertKioskServing, type KioskAuth } from './auth';
 import { KioskApiError } from './http';
 
@@ -36,16 +36,18 @@ export async function handleAiJobCreate(auth: KioskAuth, body: AiJobRequest): Pr
   assertKioskServing(auth);
   await sweepAiJobs();
   try {
-    // A kiosk that charges must bring a paid payment for every image (AI price of its settings)
-    const cur = await currentSettings(auth.kiosk);
-    const charges = !!cur && cur.settings.payment.enabled && !cur.settings.payment.bypass;
-    if (charges && !body.paymentId) throw new AiJobError('AD0008', 402, 'ภาพ AI ต้องชำระเงินก่อน');
+    // Every image is paid for, unless the shop chose free use (bypass) for this kiosk. A kiosk
+    // with payments switched off and no bypass gets nothing for free on the platform's AI keys.
+    const cur = await shownSettings(auth.kiosk);
+    const free = !!cur && cur.settings.payment.bypass;
+    if (!free && !cur?.settings.payment.enabled) throw new AiJobError('AD0008', 402, 'ร้านนี้ยังไม่ได้เปิดรับชำระเงินสำหรับภาพ AI');
+    if (!free && !body.paymentId) throw new AiJobError('AD0008', 402, 'ภาพ AI ต้องชำระเงินก่อน');
     const { job, created } = await createAiJob(auth.org, auth.kiosk.id, {
       requestId: body.requestId,
       sceneId: body.sceneId,
       photo: parseImage(body.photo),
       crop: body.faceCrop ? parseImage(body.faceCrop) : null,
-      payment: charges && body.paymentId ? { id: body.paymentId, minAmount: cur!.settings.products.ai.price } : null
+      payment: !free && body.paymentId ? { id: body.paymentId } : null
     });
     return { job: view(job), run: created ? job.id : null };
   } catch (err) {

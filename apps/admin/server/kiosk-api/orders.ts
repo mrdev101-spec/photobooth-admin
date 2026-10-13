@@ -14,14 +14,15 @@ type OrderData = z.output<typeof OrderInputSchema>;
 /**
  * Image URLs must point into this customer's own bucket (and this kiosk's folder), so a kiosk
  * cannot make the Admin show arbitrary pictures. Without storage (dev) any http(s) URL passes.
+ * Files that fail are left out (and counted); the sale itself is never refused because of them.
  */
-export async function checkFiles(auth: KioskAuth, data: Pick<OrderData, 'files'>) {
+export async function usableFiles<F extends { url: string; key?: string | null }>(auth: KioskAuth, files: F[]): Promise<{ files: F[]; dropped: number }> {
+  if (!files.length) return { files, dropped: 0 };
   const storage = (await db().select({ publicUrl: orgStorage.publicUrl }).from(orgStorage).where(eq(orgStorage.orgId, auth.org.id)).limit(1))[0];
   const folder = `p/${auth.kiosk.kioskId}/`;
-  for (const f of data.files) {
-    if (storage && !f.url.startsWith(`${storage.publicUrl}/`)) throw new KioskApiError('AD0003', 422, 'URL ของภาพต้องอยู่ใน bucket ของบัญชีนี้');
-    if (f.key && !f.key.startsWith(folder)) throw new KioskApiError('AD0003', 422, `ไฟล์ต้องอยู่ในโฟลเดอร์ ${folder}`);
-  }
+  const ok = files.filter((f) => (!storage || f.url.startsWith(`${storage.publicUrl}/`)) && (!f.key || f.key.startsWith(folder)));
+  if (ok.length !== files.length) console.warn('[kiosk-api] order files outside the bucket/folder left out', { kiosk: auth.kiosk.kioskId, dropped: files.length - ok.length });
+  return { files: ok, dropped: files.length - ok.length };
 }
 
 const response = (o: Pick<Order, 'id' | 'code' | 'status'>): OrderResponse => ({ orderId: o.id, code: o.code, status: o.status });
@@ -34,22 +35,22 @@ export async function createOrderFromKiosk(auth: KioskAuth, data: OrderData): Pr
   const existing = (await db().select().from(orders).where(and(eq(orders.kioskRowId, kiosk.id), eq(orders.clientOrderId, data.clientOrderId))).limit(1))[0];
   if (existing) return { order: response(existing), created: false };
 
-  await checkFiles(auth, data);
+  const { files, dropped } = await usableFiles(auth, data.files);
   const id = newId('ord');
   const printedAt = data.printedAt ? new Date(data.printedAt) : null;
   const status = data.fulfillment === 'kiosk' && printedAt ? 'printed_at_kiosk' : 'uploaded';
   // Still recorded (the money really moved), but flagged for the platform to look into
-  const flags = data.payment.kind === 'live' && !org.livePaymentsAllowed ? ['live_not_allowed'] : null;
+  const flagList = [...(data.payment.kind === 'live' && !org.livePaymentsAllowed ? ['live_not_allowed'] : []), ...(dropped ? ['bad_files'] : [])];
 
-  try {
-    await db().transaction(async (tx) => {
+  const insert = (code: string | null, flags: string[]) =>
+    db().transaction(async (tx) => {
       await tx.insert(orders).values({
         id,
         orgId: org.id,
         branchId: kiosk.branchId,
         kioskRowId: kiosk.id,
         clientOrderId: data.clientOrderId,
-        code: data.code ?? null,
+        code,
         mode: data.mode,
         product: data.product,
         templateId: data.templateId ?? null,
@@ -58,7 +59,7 @@ export async function createOrderFromKiosk(auth: KioskAuth, data: OrderData): Pr
         amountSatang: data.amount * 100,
         paymentKind: data.payment.kind,
         paymentRef: data.payment.ref ?? null,
-        flags,
+        flags: flags.length ? flags : null,
         fulfillment: data.fulfillment,
         status,
         downloadUrl: data.downloadUrl ?? null,
@@ -68,20 +69,27 @@ export async function createOrderFromKiosk(auth: KioskAuth, data: OrderData): Pr
         queueNo: data.queueNo ?? null,
         eventId: kiosk.eventId ?? null
       });
-      if (data.files.length) {
+      if (files.length) {
         await tx.insert(orderFiles).values(
-          data.files.map((f) => ({ id: newId('ofl'), orderId: id, orgId: org.id, kind: f.kind, url: f.url, r2Key: f.key ?? null, width: f.width ?? null, height: f.height ?? null }))
+          files.map((f) => ({ id: newId('ofl'), orderId: id, orgId: org.id, kind: f.kind, url: f.url, r2Key: f.key ?? null, width: f.width ?? null, height: f.height ?? null }))
         );
       }
     });
+
+  let code = data.code ?? null;
+  try {
+    await insert(code, flagList);
   } catch (err) {
     if (!isDuplicateKey(err)) throw err;
     // Raced with a retry of the same order, or the pickup code is taken by another order
     const again = (await db().select().from(orders).where(and(eq(orders.kioskRowId, kiosk.id), eq(orders.clientOrderId, data.clientOrderId))).limit(1))[0];
     if (again) return { order: response(again), created: false };
-    throw new KioskApiError('PU0003', 409);
+    if (!code) throw err;
+    // The sale is real: keep it without the clashing pickup code, flagged for staff
+    code = null;
+    await insert(null, [...flagList, 'pickup_code_conflict']);
   }
-  return { order: { orderId: id, code: data.code ?? null, status }, created: true };
+  return { order: { orderId: id, code, status }, created: true };
 }
 
 /** POST /orders/{ref}/printed — a kiosk-printed order came out of the printer. */

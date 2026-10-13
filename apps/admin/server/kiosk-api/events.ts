@@ -8,7 +8,7 @@ import { newId } from '@/server/lib/ids';
 import { isDuplicateKey } from '@/server/lib/errors';
 import type { KioskAuth } from './auth';
 import { KioskApiError } from './http';
-import { checkFiles, createOrderFromKiosk } from './orders';
+import { usableFiles, createOrderFromKiosk } from './orders';
 
 type KioskEvent = z.output<typeof KioskEventSchema>;
 const MAX_THUMB_BYTES = 300 * 1024;
@@ -39,17 +39,17 @@ async function handle(auth: KioskAuth, ev: KioskEvent): Promise<KioskEventResult
   if (!order) {
     // Usually the order is still in the kiosk's outbox: keep this event for later. After a while
     // (the order was refused) drop it, so the outbox never gets stuck behind it.
-    const at = ev.type === 'job' ? Date.parse(ev.at) : NaN;
+    const at = 'at' in ev && typeof ev.at === 'string' ? Date.parse(ev.at) : NaN;
     const stale = Number.isFinite(at) && Date.now() - at > ORDER_WAIT_MS;
     return { ok: false, retry: !stale, code: 'order_missing', message: 'ยังไม่มีออเดอร์นี้' };
   }
 
   if (ev.type === 'files') {
-    await checkFiles(auth, ev);
+    const { files } = await usableFiles(auth, ev.files);
     if (ev.downloadUrl) await db().update(orders).set({ downloadUrl: ev.downloadUrl }).where(eq(orders.id, order.id));
-    if (ev.files.length) {
+    if (files.length) {
       const known = await db().select({ url: orderFiles.url }).from(orderFiles).where(eq(orderFiles.orderId, order.id));
-      const fresh = ev.files.filter((f) => !known.some((k) => k.url === f.url));
+      const fresh = files.filter((f) => !known.some((k) => k.url === f.url));
       if (fresh.length) {
         await db().insert(orderFiles).values(fresh.map((f) => ({ id: newId('ofl'), orderId: order.id, orgId: auth.org.id, kind: f.kind, url: f.url, r2Key: f.key ?? null, width: f.width ?? null, height: f.height ?? null })));
       }
