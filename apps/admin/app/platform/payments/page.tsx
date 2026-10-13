@@ -40,7 +40,7 @@ export default async function PlatformPaymentsPage({ searchParams }: { searchPar
 
       <Card
         title="บัญชี Stripe กลาง"
-        subtitle="key เก็บแบบเข้ารหัส ไม่ส่งไปที่ตู้ เว้นว่าง = ใช้ค่าเดิม"
+        subtitle="key เก็บแบบเข้ารหัส Secret key ไม่ส่งไปที่ตู้ (ตู้ได้เฉพาะ Restricted key สำหรับขายตอน Admin ล่ม) เว้นว่าง = ใช้ค่าเดิม"
         icon={<Landmark aria-hidden />}
         actions={
           anyKey ? (
